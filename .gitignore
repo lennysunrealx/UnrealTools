@@ -1,0 +1,32 @@
+# Unreal Engine
+Binaries/
+DerivedDataCache/
+Intermediate/
+Saved/
+
+# Visual Studio
+.vs/
+*.VC.db
+*.VC.opendb
+*.sln
+.vsconfig
+
+# Rider / JetBrains
+.idea/
+
+# Build artifacts
+*.obj
+*.pdb
+*.exe
+*.dll
+
+# Logs
+*.log
+
+# User-specific config
+Config/DefaultEditorPerProjectUserSettings.ini
+
+# Plugin temp/build folders
+Plugins/*/Binaries/
+Plugins/*/Intermediate/
+Plugins/*/Saved/
