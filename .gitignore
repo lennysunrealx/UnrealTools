@@ -30,3 +30,17 @@ Config/DefaultEditorPerProjectUserSettings.ini
 Plugins/*/Binaries/
 Plugins/*/Intermediate/
 Plugins/*/Saved/
+
+# Ignore all Content by default
+Content/*
+
+# Re-open Content so selected subfolders can be tracked
+!Content/
+
+# Allow these folders themselves
+!Content/BlueprintTools/
+!Content/PythonTools/
+
+# Allow everything inside them
+!Content/BlueprintTools/**
+!Content/PythonTools/**
