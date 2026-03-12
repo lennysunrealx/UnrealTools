@@ -23,6 +23,12 @@ Saved/
 # Logs
 *.log
 
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
 # User-specific config
 Config/DefaultEditorPerProjectUserSettings.ini
 
