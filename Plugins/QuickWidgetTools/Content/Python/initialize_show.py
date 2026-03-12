@@ -12,7 +12,8 @@ What it does:
 - Accepts a show name string from Blueprint
 - Sanitizes it into a safe Unreal folder name like: _MyCoolShow
 - Creates the folder tree under /Game/_ShowName
-- Creates a Blueprint asset named "_folderholder" in each folder
+- Creates a Blueprint asset named "_showholder" in the root show folder
+- Creates a Blueprint asset named "_folderholder" in each subfolder
 - The Blueprint parent class is Object
 - Safe to re-run
 - Logs all actions
@@ -29,6 +30,7 @@ import unreal
 
 DEFAULT_SHOW_NAME = "ShowName"
 PLACEHOLDER_ASSET_NAME = "_folderholder"
+ROOT_PLACEHOLDER_ASSET_NAME = "_showholder"
 
 FOLDER_TREE = {
     "Assets": [
@@ -126,8 +128,15 @@ def build_all_game_paths(show_folder_name):
     return paths
 
 
-def get_placeholder_asset_path(folder_game_path):
-    return f"{folder_game_path.rstrip('/')}/{PLACEHOLDER_ASSET_NAME}"
+def get_placeholder_asset_name(folder_game_path, root_game_path):
+    if folder_game_path.rstrip('/') == root_game_path.rstrip('/'):
+        return ROOT_PLACEHOLDER_ASSET_NAME
+    return PLACEHOLDER_ASSET_NAME
+
+
+def get_placeholder_asset_path(folder_game_path, root_game_path):
+    placeholder_asset_name = get_placeholder_asset_name(folder_game_path, root_game_path)
+    return f"{folder_game_path.rstrip('/')}/{placeholder_asset_name}"
 
 
 # -----------------------------------------------------------------------------
@@ -177,15 +186,16 @@ def delete_asset_if_broken(asset_path):
     return True
 
 
-def ensure_placeholder_blueprint(folder_game_path):
+def ensure_placeholder_blueprint(folder_game_path, root_game_path):
     """
-    Ensures a Blueprint asset named _folderholder exists in the given folder.
+    Ensures a placeholder Blueprint asset exists in the given folder.
     The Blueprint parent class is Object.
 
     Returns:
         ("created", asset_path) or ("exists", asset_path)
     """
-    asset_path = get_placeholder_asset_path(folder_game_path)
+    placeholder_asset_name = get_placeholder_asset_name(folder_game_path, root_game_path)
+    asset_path = get_placeholder_asset_path(folder_game_path, root_game_path)
 
     if unreal.EditorAssetLibrary.does_asset_exist(asset_path):
         loaded_existing = unreal.EditorAssetLibrary.load_asset(asset_path)
@@ -201,7 +211,7 @@ def ensure_placeholder_blueprint(folder_game_path):
     factory.set_editor_property("edit_after_new", False)
 
     asset_obj = asset_tools.create_asset(
-        asset_name=PLACEHOLDER_ASSET_NAME,
+        asset_name=placeholder_asset_name,
         package_path=folder_game_path,
         asset_class=unreal.Blueprint,
         factory=factory
@@ -242,7 +252,7 @@ def scan_missing_items(show_name):
         if not unreal.EditorAssetLibrary.does_directory_exist(folder_path):
             missing_folder_count += 1
 
-        asset_path = get_placeholder_asset_path(folder_path)
+        asset_path = get_placeholder_asset_path(folder_path, root_game_path)
         if not unreal.EditorAssetLibrary.does_asset_exist(asset_path):
             missing_asset_count += 1
 
@@ -264,7 +274,7 @@ def create_show_structure(requested_show_name):
     sanitized_show_name = sanitize_show_name(requested_show_name)
     root_game_path = f"/Game/{sanitized_show_name}"
     all_game_paths = build_all_game_paths(sanitized_show_name)
-    root_placeholder_asset_path = get_placeholder_asset_path(root_game_path)
+    root_placeholder_asset_path = get_placeholder_asset_path(root_game_path, root_game_path)
 
     log(f"Requested show name: {requested_show_name}")
     log(f"Sanitized show name: {sanitized_show_name}")
@@ -284,7 +294,10 @@ def create_show_structure(requested_show_name):
             existing_folders += 1
             log(f"Folder already exists: {folder_path}")
 
-        asset_result, asset_path = ensure_placeholder_blueprint(folder_game_path=folder_path)
+        asset_result, asset_path = ensure_placeholder_blueprint(
+            folder_game_path=folder_path,
+            root_game_path=root_game_path,
+        )
         if asset_result == "created":
             created_assets += 1
             log(f"Created placeholder Blueprint: {asset_path}")
@@ -336,15 +349,16 @@ def create_show_structure(requested_show_name):
 
 def delete_all_placeholder_assets(show_name):
     """
-    Deletes all _folderholder Blueprint assets for a given show.
+    Deletes _showholder at the root and _folderholder in subfolders for a given show.
     """
     sanitized_show_name = sanitize_show_name(show_name)
+    root_game_path = f"/Game/{sanitized_show_name}"
     all_game_paths = build_all_game_paths(sanitized_show_name)
 
     deleted_count = 0
 
     for folder_path in all_game_paths:
-        asset_path = get_placeholder_asset_path(folder_path)
+        asset_path = get_placeholder_asset_path(folder_path, root_game_path)
         if unreal.EditorAssetLibrary.does_asset_exist(asset_path):
             deleted = unreal.EditorAssetLibrary.delete_asset(asset_path)
             if deleted:
