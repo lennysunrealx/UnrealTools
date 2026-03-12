@@ -48,7 +48,7 @@ def run(show_name):
         if not unreal.EditorAssetLibrary.does_directory_exist(child_path):
             continue
 
-        sequence_name = child_path.rsplit("/", 1)[-1]
+        sequence_name = child_path.rstrip("/").rsplit("/", 1)[-1]
         holder_path = f"{child_path}/_sequenceholder"
 
         if unreal.EditorAssetLibrary.does_asset_exist(holder_path):
