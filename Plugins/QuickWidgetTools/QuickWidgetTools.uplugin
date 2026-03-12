@@ -1,0 +1,17 @@
+{
+  "FileVersion": 3,
+  "Version": 1,
+  "VersionName": "1.0",
+  "FriendlyName": "Quick Widget Tools",
+  "Description": "Editor plugin that scans plugin content for Editor Utility Widgets and adds them to the Unreal main menu.",
+  "Category": "Editor",
+  "CanContainContent": true,
+  "EnabledByDefault": true,
+  "Modules": [
+    {
+      "Name": "QuickWidgetTools",
+      "Type": "Editor",
+      "LoadingPhase": "Default"
+    }
+  ]
+}

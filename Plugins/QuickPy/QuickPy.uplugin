@@ -1,0 +1,23 @@
+{
+    "FileVersion": 3,
+    "Version": 1,
+    "VersionName": "1.0.0",
+    "FriendlyName": "QuickPy",
+    "Description": "Adds a QuickPy top-level menu and About window to the Unreal Editor.",
+    "Category": "Editor",
+    "CreatedBy": "Lenny Gordon",
+    "CreatedByURL": "",
+    "DocsURL": "",
+    "MarketplaceURL": "",
+    "SupportURL": "",
+    "CanContainContent": false,
+    "IsBetaVersion": false,
+    "Installed": false,
+    "Modules": [
+        {
+            "Name": "QuickPy",
+            "Type": "Editor",
+            "LoadingPhase": "Default"
+        }
+    ]
+}
