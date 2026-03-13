@@ -13,6 +13,122 @@
 
 #define LOCTEXT_NAMESPACE "FQuickWidgetToolsModule"
 
+namespace QuickWidgetToolsMenu
+{
+struct FParsedWidgetMenuData
+{
+    FName RawAssetName;
+    bool bHasValidPattern = false;
+    int32 ToolOrderNumber = MAX_int32;
+    FString DisplayLabel;
+};
+
+FString BuildFriendlyLabel(const FString& InToolName)
+{
+    FString SpacedLabel;
+    SpacedLabel.Reserve(InToolName.Len() * 2);
+
+    for (int32 Index = 0; Index < InToolName.Len(); ++Index)
+    {
+        const TCHAR CurrentChar = InToolName[Index];
+
+        if (CurrentChar == TEXT('_'))
+        {
+            SpacedLabel.AppendChar(TEXT(' '));
+            continue;
+        }
+
+        if (Index > 0)
+        {
+            const TCHAR PreviousChar = InToolName[Index - 1];
+            const bool bPreviousIsLowerOrDigit = FChar::IsLower(PreviousChar) || FChar::IsDigit(PreviousChar);
+            const bool bCurrentIsUpper = FChar::IsUpper(CurrentChar);
+            const bool bAcronymBoundary =
+                FChar::IsUpper(PreviousChar) &&
+                bCurrentIsUpper &&
+                (Index + 1 < InToolName.Len()) &&
+                FChar::IsLower(InToolName[Index + 1]);
+
+            if (bCurrentIsUpper && (bPreviousIsLowerOrDigit || bAcronymBoundary))
+            {
+                SpacedLabel.AppendChar(TEXT(' '));
+            }
+        }
+
+        SpacedLabel.AppendChar(CurrentChar);
+    }
+
+    FString NormalizedLabel;
+    NormalizedLabel.Reserve(SpacedLabel.Len());
+
+    bool bLastWasSpace = true;
+    for (const TCHAR Character : SpacedLabel)
+    {
+        const bool bIsSpace = FChar::IsWhitespace(Character);
+        if (bIsSpace)
+        {
+            if (!bLastWasSpace)
+            {
+                NormalizedLabel.AppendChar(TEXT(' '));
+            }
+
+            bLastWasSpace = true;
+            continue;
+        }
+
+        NormalizedLabel.AppendChar(Character);
+        bLastWasSpace = false;
+    }
+
+    NormalizedLabel.TrimStartAndEndInline();
+    return NormalizedLabel;
+}
+
+FParsedWidgetMenuData ParseWidgetMenuData(const FAssetData& Asset)
+{
+    FParsedWidgetMenuData ParsedData;
+    ParsedData.RawAssetName = Asset.AssetName;
+
+    const FString RawName = Asset.AssetName.ToString();
+    ParsedData.DisplayLabel = RawName;
+
+    FString Prefix;
+    FString OrderText;
+    FString ToolName;
+
+    if (!RawName.Split(TEXT("_"), &Prefix, &OrderText))
+    {
+        return ParsedData;
+    }
+
+    if (!OrderText.Split(TEXT("_"), &OrderText, &ToolName))
+    {
+        return ParsedData;
+    }
+
+    if (!Prefix.Equals(TEXT("WBP"), ESearchCase::CaseSensitive))
+    {
+        return ParsedData;
+    }
+
+    if (OrderText.IsEmpty() || ToolName.IsEmpty() || !OrderText.IsNumeric())
+    {
+        return ParsedData;
+    }
+
+    ParsedData.bHasValidPattern = true;
+    ParsedData.ToolOrderNumber = FCString::Atoi(*OrderText);
+
+    const FString FriendlyLabel = BuildFriendlyLabel(ToolName);
+    if (!FriendlyLabel.IsEmpty())
+    {
+        ParsedData.DisplayLabel = FriendlyLabel;
+    }
+
+    return ParsedData;
+}
+} // namespace QuickWidgetToolsMenu
+
 void FQuickWidgetToolsModule::StartupModule()
 {
     RegisterPluginPythonPath();
@@ -151,16 +267,42 @@ void FQuickWidgetToolsModule::PopulateWidgetsMenu(UToolMenu* Menu)
         return;
     }
 
-    WidgetAssets.Sort([](const FAssetData& A, const FAssetData& B)
-        {
-            return A.AssetName.LexicalLess(B.AssetName);
-        });
+    struct FWidgetMenuEntryData
+    {
+        FAssetData Asset;
+        QuickWidgetToolsMenu::FParsedWidgetMenuData ParsedData;
+    };
+
+    TArray<FWidgetMenuEntryData> MenuEntries;
+    MenuEntries.Reserve(WidgetAssets.Num());
 
     for (const FAssetData& Asset : WidgetAssets)
     {
-        const FText Label = FText::FromName(Asset.AssetName);
-        const FString ObjectPathString = Asset.GetSoftObjectPath().ToString();
-        const FText Tooltip = FText::FromString(ObjectPathString);
+        FWidgetMenuEntryData& EntryData = MenuEntries.AddDefaulted_GetRef();
+        EntryData.Asset = Asset;
+        EntryData.ParsedData = QuickWidgetToolsMenu::ParseWidgetMenuData(Asset);
+    }
+
+    MenuEntries.Sort([](const FWidgetMenuEntryData& A, const FWidgetMenuEntryData& B)
+        {
+            if (A.ParsedData.bHasValidPattern != B.ParsedData.bHasValidPattern)
+            {
+                return A.ParsedData.bHasValidPattern;
+            }
+
+            if (A.ParsedData.bHasValidPattern && A.ParsedData.ToolOrderNumber != B.ParsedData.ToolOrderNumber)
+            {
+                return A.ParsedData.ToolOrderNumber < B.ParsedData.ToolOrderNumber;
+            }
+
+            return A.Asset.AssetName.LexicalLess(B.Asset.AssetName);
+        });
+
+    for (const FWidgetMenuEntryData& MenuEntry : MenuEntries)
+    {
+        const FAssetData& Asset = MenuEntry.Asset;
+        const FText Label = FText::FromString(MenuEntry.ParsedData.DisplayLabel);
+        const FText Tooltip = FText::FromString(Asset.GetSoftObjectPath().ToString());
         const FSoftObjectPath WidgetPath = Asset.GetSoftObjectPath();
 
         FToolMenuEntry Entry = FToolMenuEntry::InitMenuEntry(
