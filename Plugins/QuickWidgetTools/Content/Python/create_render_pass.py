@@ -26,6 +26,13 @@ def _sanitize_shot_name(value):
     return cleaned.upper()
 
 
+def _sanitize_pass_name(value):
+    if value is None:
+        return ""
+    cleaned = re.sub(r"[^A-Za-z0-9_]", "", str(value))
+    return cleaned.lower()
+
+
 def _get_tracks(sequence):
     if hasattr(sequence, "get_tracks"):
         try:
@@ -172,15 +179,16 @@ def _create_folder_if_missing(folder_path):
     return unreal.EditorAssetLibrary.make_directory(folder_path)
 
 
-def run(show_name, shot_name):
+def run(show_name, shot_name, pass_name):
     """
-    Create or update a beauty render pass Level Sequence for a shot.
+    Create or update a render pass Level Sequence for a shot.
 
     Returns:
-        str: beauty sequence asset path on success, or "" on failure.
+        str: render pass sequence asset path on success, or "" on failure.
     """
     sanitized_show_name = _sanitize_show_name(show_name)
     sanitized_shot_name = _sanitize_shot_name(shot_name)
+    sanitized_pass_name = _sanitize_pass_name(pass_name)
 
     if not sanitized_show_name:
         _log_error("Sanitized show_name is empty.")
@@ -188,6 +196,10 @@ def run(show_name, shot_name):
 
     if not sanitized_shot_name:
         _log_error("Sanitized shot_name is empty.")
+        return ""
+
+    if not sanitized_pass_name:
+        _log_error("Sanitized pass_name is empty.")
         return ""
 
     sanitized_sequence_name = sanitized_shot_name.split("_", 1)[0]
@@ -230,41 +242,41 @@ def run(show_name, shot_name):
         _log_error(f"Failed to create or access RenderPasses folder: {render_pass_folder}")
         return ""
 
-    beauty_asset_name = f"{sanitized_shot_name}_beauty"
-    beauty_asset_path = f"{render_pass_folder}/{beauty_asset_name}"
+    render_pass_asset_name = f"{sanitized_shot_name}_{sanitized_pass_name}"
+    render_pass_asset_path = f"{render_pass_folder}/{render_pass_asset_name}"
 
-    if unreal.EditorAssetLibrary.does_asset_exist(beauty_asset_path):
-        beauty_sequence = unreal.EditorAssetLibrary.load_asset(beauty_asset_path)
-        if not beauty_sequence or not isinstance(beauty_sequence, unreal.LevelSequence):
-            _log_error(f"Existing beauty asset is not a Level Sequence: {beauty_asset_path}")
+    if unreal.EditorAssetLibrary.does_asset_exist(render_pass_asset_path):
+        render_pass_sequence = unreal.EditorAssetLibrary.load_asset(render_pass_asset_path)
+        if not render_pass_sequence or not isinstance(render_pass_sequence, unreal.LevelSequence):
+            _log_error(f"Existing render pass asset is not a Level Sequence: {render_pass_asset_path}")
             return ""
-        _log(f"Using existing beauty sequence: {beauty_asset_path}")
+        _log(f"Using existing render pass sequence: {render_pass_asset_path}")
     else:
         asset_tools = unreal.AssetToolsHelpers.get_asset_tools()
         factory = unreal.LevelSequenceFactoryNew()
-        beauty_sequence = asset_tools.create_asset(
-            asset_name=beauty_asset_name,
+        render_pass_sequence = asset_tools.create_asset(
+            asset_name=render_pass_asset_name,
             package_path=render_pass_folder,
             asset_class=unreal.LevelSequence,
             factory=factory,
         )
-        if not beauty_sequence:
-            _log_error(f"Failed to create beauty sequence: {beauty_asset_path}")
+        if not render_pass_sequence:
+            _log_error(f"Failed to create render pass sequence: {render_pass_asset_path}")
             return ""
-        _log(f"Created beauty sequence: {beauty_asset_path}")
+        _log(f"Created render pass sequence: {render_pass_asset_path}")
 
-    beauty_sequence.set_playback_start(start_frame)
-    beauty_sequence.set_playback_end(end_frame)
+    render_pass_sequence.set_playback_start(start_frame)
+    render_pass_sequence.set_playback_end(end_frame)
 
     master_path = master_sequence.get_path_name()
-    existing_refs = _build_referenced_subsequence_paths(beauty_sequence)
+    existing_refs = _build_referenced_subsequence_paths(render_pass_sequence)
 
     if master_path in existing_refs:
-        _log("Master sequence already referenced in beauty sequence; skipping duplicate section creation.")
+        _log("Master sequence already referenced in render pass sequence; skipping duplicate section creation.")
     else:
-        sub_track = _add_subsequence_track(beauty_sequence)
+        sub_track = _add_subsequence_track(render_pass_sequence)
         if not sub_track:
-            _log_error("Failed to add subsequence track to beauty sequence.")
+            _log_error("Failed to add subsequence track to render pass sequence.")
             return ""
 
         section = sub_track.add_section()
@@ -279,11 +291,11 @@ def run(show_name, shot_name):
         if not _set_section_range(section, start_frame, end_frame):
             _log("Unable to set section range using current API variant; continuing.")
 
-        _log("Added master sequence as subsequence in beauty sequence.")
+        _log("Added master sequence as subsequence in render pass sequence.")
 
-    if not unreal.EditorAssetLibrary.save_loaded_asset(beauty_sequence):
-        _log_error(f"Failed to save beauty sequence: {beauty_asset_path}")
+    if not unreal.EditorAssetLibrary.save_loaded_asset(render_pass_sequence):
+        _log_error(f"Failed to save render pass sequence: {render_pass_asset_path}")
         return ""
 
-    _log(f"Render pass setup complete: {beauty_asset_path}")
-    return beauty_asset_path
+    _log(f"Render pass setup complete: {render_pass_asset_path}")
+    return render_pass_asset_path
