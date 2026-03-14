@@ -94,12 +94,45 @@ def _set_section_range(section, start_frame, end_frame):
     return range_applied
 
 
+def _get_sequence_tracks(sequence):
+    if hasattr(sequence, "get_tracks"):
+        return sequence.get_tracks()
+
+    if hasattr(sequence, "get_master_tracks"):
+        return sequence.get_master_tracks()
+
+    _log_error("Unable to inspect sequence tracks: sequence has neither get_tracks() nor get_master_tracks().")
+    return []
+
+
+def _add_subsequence_track(sequence):
+    if hasattr(sequence, "add_track"):
+        return sequence.add_track(unreal.MovieSceneSubTrack)
+
+    if hasattr(sequence, "add_master_track"):
+        return sequence.add_master_track(unreal.MovieSceneSubTrack)
+
+    _log_error("Unable to create subsequence track: sequence has neither add_track() nor add_master_track().")
+    return None
+
+
+def _get_track_sections(track):
+    if hasattr(track, "get_sections"):
+        return track.get_sections()
+
+    if hasattr(unreal, "MovieSceneTrackExtensions") and hasattr(unreal.MovieSceneTrackExtensions, "get_sections"):
+        return unreal.MovieSceneTrackExtensions.get_sections(track)
+
+    _log_error("Unable to inspect track sections: track has no get_sections() and MovieSceneTrackExtensions.get_sections() is unavailable.")
+    return []
+
+
 def _build_existing_subsequence_path_set(master_sequence):
     existing_paths = set()
-    for track in master_sequence.get_master_tracks():
+    for track in _get_sequence_tracks(master_sequence):
         if not isinstance(track, unreal.MovieSceneSubTrack):
             continue
-        for section in track.get_sections():
+        for section in _get_track_sections(track):
             sub_sequence = _get_subsequence_reference(section)
             if not sub_sequence:
                 continue
@@ -218,7 +251,7 @@ def run(show_name, shot_name, start_frame, end_frame):
             _log(f"Subsequence already referenced in master, skipping track creation: {asset_path}")
             continue
 
-        track = master_sequence.add_master_track(unreal.MovieSceneSubTrack)
+        track = _add_subsequence_track(master_sequence)
         if not track:
             _log_error(f"Failed to create subsequence track for: {asset_path}")
             return []
