@@ -43,7 +43,11 @@ def _resolve_data_asset_class():
     generated_class = None
 
     if hasattr(blueprint_asset, "generated_class"):
-        generated_class = blueprint_asset.generated_class
+        generated_class_attr = blueprint_asset.generated_class
+        if callable(generated_class_attr):
+            generated_class = generated_class_attr()
+        else:
+            generated_class = generated_class_attr
 
     if not generated_class:
         generated_class_path = f"{BP_SHOT_DATA_ASSET_BLUEPRINT_PATH}_C"
@@ -56,7 +60,7 @@ def _resolve_data_asset_class():
         )
         return None
 
-    _log(f"Resolved generated class: {generated_class}")
+    _log(f"Final resolved generated class: {generated_class}")
     return generated_class
 
 
