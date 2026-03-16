@@ -31,6 +31,7 @@ def _sanitize_sequence_or_shot_name(value):
 
 
 def _resolve_data_asset_class():
+    _log(f"Resolving Blueprint asset path: {BP_SHOT_DATA_ASSET_BLUEPRINT_PATH}")
     blueprint_asset = unreal.EditorAssetLibrary.load_asset(BP_SHOT_DATA_ASSET_BLUEPRINT_PATH)
     if not blueprint_asset:
         _log_error(
@@ -55,6 +56,7 @@ def _resolve_data_asset_class():
         )
         return None
 
+    _log(f"Resolved generated class: {generated_class}")
     return generated_class
 
 
@@ -63,10 +65,15 @@ def _set_active_and_save(asset_object, asset_path):
         _log_error(f"Asset object is invalid: {asset_path}")
         return ""
 
+    set_active_success = False
     try:
         asset_object.set_editor_property("IsActive", True)
+        set_active_success = True
     except Exception as exc:
         _log_error(f"Failed to set IsActive=True on '{asset_path}': {exc}")
+
+    _log(f"IsActive set success for '{asset_path}': {set_active_success}")
+    if not set_active_success:
         return ""
 
     if not unreal.EditorAssetLibrary.save_loaded_asset(asset_object):
@@ -122,6 +129,7 @@ def run(ShotName, SequenceName, ShowName):
     existing_asset = unreal.EditorAssetLibrary.load_asset(asset_path)
     if existing_asset:
         _log(f"Asset already exists. Updating IsActive: {asset_path}")
+        _log(f"Created/loaded asset object class: {existing_asset.get_class()}")
         return _set_active_and_save(existing_asset, asset_path)
 
     factory = unreal.DataAssetFactory()
@@ -132,7 +140,7 @@ def run(ShotName, SequenceName, ShowName):
     created_asset = unreal.AssetToolsHelpers.get_asset_tools().create_asset(
         asset_name=asset_name,
         package_path=target_folder,
-        asset_class=unreal.DataAsset,
+        asset_class=data_asset_class,
         factory=factory,
     )
 
@@ -140,5 +148,6 @@ def run(ShotName, SequenceName, ShowName):
         _log_error(f"Failed to create shot data asset: {asset_path}")
         return ""
 
+    _log(f"Created/loaded asset object class: {created_asset.get_class()}")
     loaded_asset = unreal.EditorAssetLibrary.load_asset(asset_path)
     return _set_active_and_save(loaded_asset, asset_path)
