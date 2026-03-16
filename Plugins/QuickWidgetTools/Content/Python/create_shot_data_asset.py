@@ -6,7 +6,7 @@ LOG_PREFIX = "[CreateShotDataAsset]"
 
 # Update this path to your BP_ShotDataAsset Blueprint asset if needed.
 # Expected format: /Game/Path/To/BP_ShotDataAsset.BP_ShotDataAsset
-BP_SHOT_DATA_ASSET_BLUEPRINT_PATH = "/Game/BP_ShotDataAsset.BP_ShotDataAsset"
+BP_SHOT_DATA_ASSET_BLUEPRINT_PATH = "/QuickWidgetTools/Misc/BP_ShotDataAsset.BP_ShotDataAsset"
 
 
 def _log(message):
