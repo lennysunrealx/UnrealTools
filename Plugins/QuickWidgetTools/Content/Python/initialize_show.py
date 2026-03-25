@@ -34,19 +34,14 @@ ROOT_PLACEHOLDER_ASSET_NAME = "_showholder"
 
 FOLDER_TREE = {
     "Assets": [
-        "Characters",
-        "Environments",
-        "Props",
-        "Foliage",
-        "Vehicles",
-        "Materials",
-        "Misc",
-        "FX",
-    ],
-    "Maps": [
-        "Layout",
-        "Lighting",
-        "Master",
+        "chr_ExampleCharacter",
+        "lvl_ExampleLevel",
+        "prp_ExampleProp",
+        "fol_ExampleFoliage",
+        "vhl_ExampleVehicle",
+        "mat_ExampleMaterial",
+        "msc_ExampleMisc",
+        "fx_ExampleFX",
     ],
     "Sequences": [],
     "RenderSettings": [
