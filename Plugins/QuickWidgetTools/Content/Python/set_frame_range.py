@@ -39,6 +39,29 @@ def _set_sequence_playback_range(sequence, start_frame, end_frame):
         return False
 
 
+def _get_sequence_playback_range(sequence):
+    start_value = "Unknown"
+    end_value = "Unknown"
+
+    for getter_name in ("get_playback_start", "get_start_frame"):
+        if hasattr(sequence, getter_name):
+            try:
+                start_value = getattr(sequence, getter_name)()
+                break
+            except Exception:
+                pass
+
+    for getter_name in ("get_playback_end", "get_end_frame"):
+        if hasattr(sequence, getter_name):
+            try:
+                end_value = getattr(sequence, getter_name)()
+                break
+            except Exception:
+                pass
+
+    return start_value, end_value
+
+
 def _get_tracks(sequence):
     if hasattr(sequence, "get_tracks"):
         try:
@@ -313,10 +336,13 @@ def _sync_render_pass_sections(render_pass_sequence, master_sequence_path, start
 
 def run(show_name, sequence_name, shot_name, start_frame, end_frame):
     """Update a shot frame range for master, subsequences, and render passes."""
+    _log("run() entered")
     _log(
-        "Inputs received: "
+        "Raw inputs received: "
         f"show_name={show_name}, sequence_name={sequence_name}, shot_name={shot_name}, "
-        f"start_frame={start_frame}, end_frame={end_frame}"
+        f"start_frame={start_frame}, end_frame={end_frame}, "
+        f"types=({type(show_name).__name__}, {type(sequence_name).__name__}, {type(shot_name).__name__}, "
+        f"{type(start_frame).__name__}, {type(end_frame).__name__})"
     )
 
     raw_show_name = "" if show_name is None else str(show_name)
@@ -333,17 +359,26 @@ def run(show_name, sequence_name, shot_name, start_frame, end_frame):
     )
 
     if not sanitized_show_name or sanitized_show_name != raw_show_name:
-        _log_error("Validation failed: show_name must contain letters/numbers only.")
+        _log_error(
+            "Validation failed: show_name must contain letters/numbers only. "
+            f"raw='{raw_show_name}', sanitized='{sanitized_show_name}'"
+        )
         _log("Final return value: False")
         return False
 
     if not sanitized_sequence_name or sanitized_sequence_name != raw_sequence_name.upper():
-        _log_error("Validation failed: sequence_name must contain uppercase letters/numbers/underscores only.")
+        _log_error(
+            "Validation failed: sequence_name must contain uppercase letters/numbers/underscores only. "
+            f"raw='{raw_sequence_name}', sanitized='{sanitized_sequence_name}'"
+        )
         _log("Final return value: False")
         return False
 
     if not sanitized_shot_name or sanitized_shot_name != raw_shot_name.upper():
-        _log_error("Validation failed: shot_name must contain uppercase letters/numbers/underscores only.")
+        _log_error(
+            "Validation failed: shot_name must contain uppercase letters/numbers/underscores only. "
+            f"raw='{raw_shot_name}', sanitized='{sanitized_shot_name}'"
+        )
         _log("Final return value: False")
         return False
 
@@ -381,6 +416,7 @@ def run(show_name, sequence_name, shot_name, start_frame, end_frame):
         _log("Final return value: False")
         return False
 
+    _log(f"Attempting to load master Level Sequence asset: {master_sequence_path}")
     master_sequence = _load_level_sequence(master_sequence_path, required=True)
     _log(f"Master sequence found: {bool(master_sequence)}")
     if not master_sequence:
@@ -388,6 +424,15 @@ def run(show_name, sequence_name, shot_name, start_frame, end_frame):
         _log("Final return value: False")
         return False
 
+    current_master_start, current_master_end = _get_sequence_playback_range(master_sequence)
+    _log(
+        "Current master playback range before update: "
+        f"asset={master_sequence_path}, start={current_master_start}, end={current_master_end}"
+    )
+    _log(
+        "Applying new master playback range: "
+        f"asset={master_sequence_path}, start={start_frame}, end={end_frame}"
+    )
     if not _set_sequence_playback_range(master_sequence, start_frame, end_frame):
         _log_error(f"Failure reason: unable to set playback range on master sequence: {master_sequence_path}")
         _log("Final return value: False")
