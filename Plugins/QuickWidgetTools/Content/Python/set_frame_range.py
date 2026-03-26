@@ -154,16 +154,45 @@ def _get_asset_name(asset_or_path):
 
 
 def _get_asset_name_only(asset_or_path):
-    return _get_asset_name(asset_or_path)
+    """
+    Return only the short asset name.
+    Examples:
+    - asset object named ABC_000_0050_ANM -> "ABC_000_0050_ANM"
+    - "/Game/X/Y/ABC_000_0050_ANM.ABC_000_0050_ANM" -> "ABC_000_0050_ANM"
+    - "/Game/X/Y/ABC_000_0050_ANM" -> "ABC_000_0050_ANM"
+    Never return full paths.
+    """
+    if asset_or_path is None:
+        return "Unknown"
+    try:
+        if hasattr(asset_or_path, "get_name"):
+            name = asset_or_path.get_name()
+            if name:
+                return str(name)
+    except Exception:
+        pass
+    text = str(asset_or_path)
+    if "." in text:
+        text = text.split(".", 1)[-1]
+    if "/" in text:
+        text = text.rsplit("/", 1)[-1]
+    return text or "Unknown"
 
 
 def _print_failed_sequence_names(failed_names):
     if not failed_names:
         return
-    unique_names = list(dict.fromkeys(name for name in failed_names if name))
-    if not unique_names:
-        return
-    _log(f"Failed child sequences: {', '.join(unique_names)}")
+    unique_names = []
+    seen = set()
+    for name in failed_names:
+        if not name:
+            continue
+        if name in seen:
+            continue
+        seen.add(name)
+        unique_names.append(name)
+    if unique_names:
+        _log("Failed child sequences: " + ", ".join(unique_names))
 
 
 def _list_assets(folder_path):
@@ -284,8 +313,6 @@ def _sync_render_pass_sections(render_pass_sequence, master_sequence_path, start
 
 def run(show_name, sequence_name, shot_name, start_frame, end_frame):
     """Update a shot frame range for master, subsequences, and render passes."""
-    failed_child_names = []
-
     _log(
         "Inputs received: "
         f"show_name={show_name}, sequence_name={sequence_name}, shot_name={shot_name}, "
@@ -369,6 +396,7 @@ def run(show_name, sequence_name, shot_name, start_frame, end_frame):
     _log(f"Updated master playback range: asset={master_sequence_path}, start={start_frame}, end={end_frame}")
 
     modified_subsequences = []
+    failed_child_names = []
     modified_render_passes = []
 
     if unreal.EditorAssetLibrary.does_directory_exist(subsequences_folder):
@@ -383,7 +411,7 @@ def run(show_name, sequence_name, shot_name, start_frame, end_frame):
 
             if not _set_sequence_playback_range(sequence_asset, start_frame, end_frame):
                 _log_error(f"Failure reason: unable to set playback range for subsequence: {asset_path}")
-                child_name = _get_asset_name_only(sequence_asset)
+                child_name = _get_asset_name_only(sequence_asset or asset_path)
                 if child_name:
                     failed_child_names.append(child_name)
                 continue
@@ -405,7 +433,7 @@ def run(show_name, sequence_name, shot_name, start_frame, end_frame):
 
             if not _set_sequence_playback_range(sequence_asset, start_frame, end_frame):
                 _log_error(f"Failure reason: unable to set playback range for render pass: {asset_path}")
-                child_name = _get_asset_name_only(sequence_asset)
+                child_name = _get_asset_name_only(sequence_asset or asset_path)
                 if child_name:
                     failed_child_names.append(child_name)
                 continue
@@ -438,14 +466,14 @@ def run(show_name, sequence_name, shot_name, start_frame, end_frame):
     for asset_path, sequence_asset in modified_subsequences:
         if not _save_asset(sequence_asset, asset_path):
             _log_error(f"Failed to save subsequence: {asset_path}")
-            child_name = _get_asset_name_only(sequence_asset)
+            child_name = _get_asset_name_only(sequence_asset or asset_path)
             if child_name:
                 failed_child_names.append(child_name)
 
     for asset_path, sequence_asset in modified_render_passes:
         if not _save_asset(sequence_asset, asset_path):
             _log_error(f"Failed to save render pass: {asset_path}")
-            child_name = _get_asset_name_only(sequence_asset)
+            child_name = _get_asset_name_only(sequence_asset or asset_path)
             if child_name:
                 failed_child_names.append(child_name)
 
