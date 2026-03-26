@@ -136,6 +136,32 @@ def _to_package_path(asset_path):
     return str(asset_path).split(".", 1)[0]
 
 
+def _get_asset_name(asset_or_path):
+    if not asset_or_path:
+        return ""
+
+    if hasattr(asset_or_path, "get_name"):
+        try:
+            return str(asset_or_path.get_name())
+        except Exception:
+            pass
+
+    package_path = _to_package_path(asset_or_path)
+    if not package_path:
+        return ""
+
+    return package_path.rsplit("/", 1)[-1]
+
+
+def _print_failed_sequence_names(failed_names):
+    if not failed_names:
+        return
+    unique_names = list(dict.fromkeys(name for name in failed_names if name))
+    if not unique_names:
+        return
+    _log(f"Failed child sequences: {', '.join(unique_names)}")
+
+
 def _list_assets(folder_path):
     try:
         return unreal.EditorAssetLibrary.list_assets(folder_path, recursive=False, include_folder=False)
@@ -176,6 +202,7 @@ def _save_asset(asset, asset_path):
 
 def _sync_master_subsequence_sections(master_sequence, subsequences_folder, start_frame, end_frame):
     updated_count = 0
+    failed_names = []
     subsequence_prefix = f"{subsequences_folder}/"
 
     for track in _get_tracks(master_sequence):
@@ -202,16 +229,20 @@ def _sync_master_subsequence_sections(master_sequence, subsequences_folder, star
                     f"reference={reference_path}, start={start_frame}, end={end_frame}"
                 )
             else:
-                _log(
-                    "Skipped master subsequence section range update (API not available): "
+                child_name = _get_asset_name(reference_path)
+                if child_name:
+                    failed_names.append(child_name)
+                _log_error(
+                    "Failed master subsequence section range update: "
                     f"reference={reference_path}"
                 )
 
-    return updated_count
+    return updated_count, failed_names
 
 
 def _sync_render_pass_sections(render_pass_sequence, master_sequence_path, start_frame, end_frame):
     updated_count = 0
+    failed = False
 
     for track in _get_tracks(render_pass_sequence):
         if not isinstance(track, unreal.MovieSceneSubTrack):
@@ -238,12 +269,13 @@ def _sync_render_pass_sections(render_pass_sequence, master_sequence_path, start
                     f"start={start_frame}, end={end_frame}"
                 )
             else:
-                _log(
-                    "Skipped render pass section range update (API not available): "
+                failed = True
+                _log_error(
+                    "Failed render pass section range update: "
                     f"render_pass={render_pass_sequence.get_path_name()}, reference={reference_path}"
                 )
 
-    return updated_count
+    return updated_count, failed
 
 
 def run(show_name, sequence_name, shot_name, start_frame, end_frame):
@@ -332,18 +364,24 @@ def run(show_name, sequence_name, shot_name, start_frame, end_frame):
 
     modified_subsequences = []
     modified_render_passes = []
+    failed_child_names = []
 
     if unreal.EditorAssetLibrary.does_directory_exist(subsequences_folder):
         for asset_path in _list_assets(subsequences_folder):
             _log(f"Subsequence asset found: {asset_path}")
             sequence_asset = _load_level_sequence(asset_path, required=False)
             if not sequence_asset:
+                child_name = _get_asset_name(asset_path)
+                if child_name:
+                    failed_child_names.append(child_name)
                 continue
 
             if not _set_sequence_playback_range(sequence_asset, start_frame, end_frame):
                 _log_error(f"Failure reason: unable to set playback range for subsequence: {asset_path}")
-                _log("Final return value: False")
-                return False
+                child_name = _get_asset_name(sequence_asset)
+                if child_name:
+                    failed_child_names.append(child_name)
+                continue
 
             _log(f"Updated subsequence playback range: {asset_path}")
             modified_subsequences.append((asset_path, sequence_asset))
@@ -355,49 +393,63 @@ def run(show_name, sequence_name, shot_name, start_frame, end_frame):
             _log(f"Render pass asset found: {asset_path}")
             sequence_asset = _load_level_sequence(asset_path, required=False)
             if not sequence_asset:
+                child_name = _get_asset_name(asset_path)
+                if child_name:
+                    failed_child_names.append(child_name)
                 continue
 
             if not _set_sequence_playback_range(sequence_asset, start_frame, end_frame):
                 _log_error(f"Failure reason: unable to set playback range for render pass: {asset_path}")
-                _log("Final return value: False")
-                return False
+                child_name = _get_asset_name(sequence_asset)
+                if child_name:
+                    failed_child_names.append(child_name)
+                continue
 
             _log(f"Updated render pass playback range: {asset_path}")
             modified_render_passes.append((asset_path, sequence_asset))
     else:
         _log(f"RenderPasses folder does not exist; continuing: {render_passes_folder}")
 
-    _sync_master_subsequence_sections(
+    _, failed_master_sync_names = _sync_master_subsequence_sections(
         master_sequence=master_sequence,
         subsequences_folder=subsequences_folder,
         start_frame=start_frame,
         end_frame=end_frame,
     )
+    failed_child_names.extend(failed_master_sync_names)
 
     for _, render_pass_sequence in modified_render_passes:
-        _sync_render_pass_sections(
+        _, render_pass_sync_failed = _sync_render_pass_sections(
             render_pass_sequence=render_pass_sequence,
             master_sequence_path=master_sequence_path,
             start_frame=start_frame,
             end_frame=end_frame,
         )
+        if render_pass_sync_failed:
+            child_name = _get_asset_name(render_pass_sequence)
+            if child_name:
+                failed_child_names.append(child_name)
 
     for asset_path, sequence_asset in modified_subsequences:
         if not _save_asset(sequence_asset, asset_path):
-            _log_error(f"Failure reason: failed to save subsequence: {asset_path}")
-            _log("Final return value: False")
-            return False
+            _log_error(f"Failed to save subsequence: {asset_path}")
+            child_name = _get_asset_name(sequence_asset)
+            if child_name:
+                failed_child_names.append(child_name)
 
     for asset_path, sequence_asset in modified_render_passes:
         if not _save_asset(sequence_asset, asset_path):
-            _log_error(f"Failure reason: failed to save render pass: {asset_path}")
-            _log("Final return value: False")
-            return False
+            _log_error(f"Failed to save render pass: {asset_path}")
+            child_name = _get_asset_name(sequence_asset)
+            if child_name:
+                failed_child_names.append(child_name)
 
     if not _save_asset(master_sequence, master_sequence_path):
         _log_error(f"Failure reason: failed to save master sequence: {master_sequence_path}")
+        _print_failed_sequence_names(failed_child_names)
         _log("Final return value: False")
         return False
 
+    _print_failed_sequence_names(failed_child_names)
     _log("Final return value: True")
     return True
