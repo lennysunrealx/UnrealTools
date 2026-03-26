@@ -153,6 +153,10 @@ def _get_asset_name(asset_or_path):
     return package_path.rsplit("/", 1)[-1]
 
 
+def _get_asset_name_only(asset_or_path):
+    return _get_asset_name(asset_or_path)
+
+
 def _print_failed_sequence_names(failed_names):
     if not failed_names:
         return
@@ -229,7 +233,7 @@ def _sync_master_subsequence_sections(master_sequence, subsequences_folder, star
                     f"reference={reference_path}, start={start_frame}, end={end_frame}"
                 )
             else:
-                child_name = _get_asset_name(reference_path)
+                child_name = _get_asset_name_only(reference_path)
                 if child_name:
                     failed_names.append(child_name)
                 _log_error(
@@ -280,6 +284,8 @@ def _sync_render_pass_sections(render_pass_sequence, master_sequence_path, start
 
 def run(show_name, sequence_name, shot_name, start_frame, end_frame):
     """Update a shot frame range for master, subsequences, and render passes."""
+    failed_child_names = []
+
     _log(
         "Inputs received: "
         f"show_name={show_name}, sequence_name={sequence_name}, shot_name={shot_name}, "
@@ -364,21 +370,20 @@ def run(show_name, sequence_name, shot_name, start_frame, end_frame):
 
     modified_subsequences = []
     modified_render_passes = []
-    failed_child_names = []
 
     if unreal.EditorAssetLibrary.does_directory_exist(subsequences_folder):
         for asset_path in _list_assets(subsequences_folder):
             _log(f"Subsequence asset found: {asset_path}")
             sequence_asset = _load_level_sequence(asset_path, required=False)
             if not sequence_asset:
-                child_name = _get_asset_name(asset_path)
+                child_name = _get_asset_name_only(asset_path)
                 if child_name:
                     failed_child_names.append(child_name)
                 continue
 
             if not _set_sequence_playback_range(sequence_asset, start_frame, end_frame):
                 _log_error(f"Failure reason: unable to set playback range for subsequence: {asset_path}")
-                child_name = _get_asset_name(sequence_asset)
+                child_name = _get_asset_name_only(sequence_asset)
                 if child_name:
                     failed_child_names.append(child_name)
                 continue
@@ -393,14 +398,14 @@ def run(show_name, sequence_name, shot_name, start_frame, end_frame):
             _log(f"Render pass asset found: {asset_path}")
             sequence_asset = _load_level_sequence(asset_path, required=False)
             if not sequence_asset:
-                child_name = _get_asset_name(asset_path)
+                child_name = _get_asset_name_only(asset_path)
                 if child_name:
                     failed_child_names.append(child_name)
                 continue
 
             if not _set_sequence_playback_range(sequence_asset, start_frame, end_frame):
                 _log_error(f"Failure reason: unable to set playback range for render pass: {asset_path}")
-                child_name = _get_asset_name(sequence_asset)
+                child_name = _get_asset_name_only(sequence_asset)
                 if child_name:
                     failed_child_names.append(child_name)
                 continue
@@ -426,21 +431,21 @@ def run(show_name, sequence_name, shot_name, start_frame, end_frame):
             end_frame=end_frame,
         )
         if render_pass_sync_failed:
-            child_name = _get_asset_name(render_pass_sequence)
+            child_name = _get_asset_name_only(render_pass_sequence)
             if child_name:
                 failed_child_names.append(child_name)
 
     for asset_path, sequence_asset in modified_subsequences:
         if not _save_asset(sequence_asset, asset_path):
             _log_error(f"Failed to save subsequence: {asset_path}")
-            child_name = _get_asset_name(sequence_asset)
+            child_name = _get_asset_name_only(sequence_asset)
             if child_name:
                 failed_child_names.append(child_name)
 
     for asset_path, sequence_asset in modified_render_passes:
         if not _save_asset(sequence_asset, asset_path):
             _log_error(f"Failed to save render pass: {asset_path}")
-            child_name = _get_asset_name(sequence_asset)
+            child_name = _get_asset_name_only(sequence_asset)
             if child_name:
                 failed_child_names.append(child_name)
 
