@@ -38,11 +38,15 @@ def _sanitize_name(raw_value, label, force_upper=False):
 
 
 def _parse_frame_number(raw_value, label):
+    """Parse a frame number where int is the expected type and numeric strings are tolerated."""
     if raw_value is None:
         return None, f"{label} is missing (None)."
 
     if isinstance(raw_value, bool):
         return None, f"{label} must be an integer, not bool. raw='{raw_value}'"
+
+    if isinstance(raw_value, int):
+        return raw_value, None
 
     try:
         text = str(raw_value).strip()
@@ -51,6 +55,12 @@ def _parse_frame_number(raw_value, label):
 
     if text == "":
         return None, f"{label} is empty after stripping whitespace. raw='{raw_value}'"
+
+    if not re.fullmatch(r"[+-]?\d+", text):
+        return None, (
+            f"{label} must be an integer (or numeric string). "
+            f"raw='{raw_value}', stripped='{text}'"
+        )
 
     try:
         value = int(text)
@@ -219,7 +229,10 @@ def _update_sequence_if_needed(sequence_path, sequence, start_frame, end_frame):
 
 
 def run(show_name, sequence_name, shot_name, start_frame, end_frame):
-    """Set playback frame range on shot master + SubSequences + RenderPasses."""
+    """Set playback frame range on shot master + SubSequences + RenderPasses.
+
+    Expected input for start_frame/end_frame is int. Numeric strings are also accepted.
+    """
     _log("run() started")
     _log(
         "Raw incoming arguments: "
