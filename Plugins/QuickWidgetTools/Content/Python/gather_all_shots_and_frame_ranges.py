@@ -247,7 +247,9 @@ def run(show_name, selected_sequence):
 
         level_path = _get_level_path_for_shot(target_folder, asset_name)
 
-        valid_rows.append((parsed["shot_number"], asset_name, playback_start, playback_end, level_path))
+        valid_rows.append(
+            (parsed["shot_number"], asset_name, playback_start, playback_end, level_path)
+        )
 
     if not valid_rows:
         _log(f"No valid shot Level Sequences found in {target_folder}")
