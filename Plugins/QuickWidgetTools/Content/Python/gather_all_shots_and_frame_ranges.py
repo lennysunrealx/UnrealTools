@@ -123,30 +123,39 @@ def _get_level_property_value(shot_data_asset):
 
 
 def _convert_level_value_to_asset_path(level_value):
+    def _clean_candidate(candidate):
+        if not isinstance(candidate, str):
+            return ""
+        cleaned = candidate.strip()
+        if not cleaned or cleaned in ("None", "null"):
+            return ""
+        if cleaned.startswith("SoftObjectPath(") and cleaned.endswith(")"):
+            cleaned = cleaned[len("SoftObjectPath(") : -1].strip().strip("\"'")
+        return cleaned
+
     if level_value is None:
         return ""
 
     if isinstance(level_value, str):
-        return level_value.strip()
+        return _clean_candidate(level_value)
 
     for getter_name in ("get_asset_path_name", "get_path_name"):
         getter = getattr(level_value, getter_name, None)
         if callable(getter):
             try:
                 raw_path = getter()
-                if isinstance(raw_path, str) and raw_path.strip():
-                    return raw_path.strip()
+                cleaned = _clean_candidate(raw_path)
+                if cleaned:
+                    return cleaned
             except Exception:
                 pass
 
     try:
-        as_text = str(level_value).strip()
+        as_text = _clean_candidate(str(level_value))
     except Exception:
         as_text = ""
 
-    if as_text and as_text not in ("None", "null"):
-        if as_text.startswith("SoftObjectPath(") and as_text.endswith(")"):
-            as_text = as_text[len("SoftObjectPath(") : -1].strip().strip("\"'")
+    if as_text:
         return as_text
 
     return ""
