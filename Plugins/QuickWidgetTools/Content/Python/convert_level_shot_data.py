@@ -77,6 +77,17 @@ def _build_master_sequence_asset_path(show_name, sequence_name, shot_name):
     return f"/Game/_{show_name}/Sequences/{sequence_name}/{shot_name}.{shot_name}"
 
 
+def _extract_level_package_path(level_path):
+    sanitized_level_path = _sanitize_level_path(level_path)
+    if not sanitized_level_path:
+        return ""
+
+    if "." in sanitized_level_path:
+        return sanitized_level_path.split(".", 1)[0]
+
+    return sanitized_level_path
+
+
 def _load_sequence_asset(show_name, sequence_name, shot_name):
     sequence_asset_path = _build_master_sequence_asset_path(
         show_name,
@@ -140,6 +151,7 @@ def _load_level_asset(level_path):
 def run(show_name, sequence_name, shot_name, level_path):
     sequence_asset = None
     level_asset = None
+    level_package_path = ""
 
     _log("----- run() called -----")
     _log(f"Raw input show_name: {show_name!r}")
@@ -152,11 +164,13 @@ def run(show_name, sequence_name, shot_name, level_path):
         clean_sequence_name = _sanitize_sequence_name(sequence_name)
         clean_shot_name = _sanitize_shot_name(shot_name)
         clean_level_path = _sanitize_level_path(level_path)
+        level_package_path = _extract_level_package_path(clean_level_path)
 
         _log(f"Sanitized show_name: {clean_show_name!r}")
         _log(f"Sanitized sequence_name: {clean_sequence_name!r}")
         _log(f"Sanitized shot_name: {clean_shot_name!r}")
         _log(f"Sanitized level_path: {clean_level_path!r}")
+        _log(f"Derived level_package_path: {level_package_path!r}")
 
         if clean_show_name and clean_sequence_name and clean_shot_name:
             sequence_asset = _load_sequence_asset(
@@ -177,6 +191,7 @@ def run(show_name, sequence_name, shot_name, level_path):
     _log(
         "Final return summary: "
         f"sequence_asset={'loaded' if sequence_asset else 'None'}, "
-        f"level_asset={'loaded' if level_asset else 'None'}"
+        f"level_asset={'loaded' if level_asset else 'None'}, "
+        f"level_package_path={level_package_path!r}"
     )
-    return sequence_asset, level_asset
+    return sequence_asset, level_asset, level_package_path
