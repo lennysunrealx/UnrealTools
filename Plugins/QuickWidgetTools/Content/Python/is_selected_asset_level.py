@@ -34,59 +34,76 @@ def _safe_class_name(asset):
         return "Unknown"
 
 
-def _is_world_asset_object(asset):
+def _asset_data_from_anything(asset):
     if asset is None:
-        return False
+        _log("AssetData conversion skipped: selected asset is None")
+        return None
 
-    try:
-        asset_class = asset.get_class()
-        world_class = unreal.World.static_class()
-        if asset_class and world_class:
-            return bool(unreal.SystemLibrary.class_is_child_of(asset_class, world_class))
-    except Exception:
-        pass
-
-    try:
-        return isinstance(asset, unreal.World)
-    except Exception:
-        return False
-
-
-def _is_world_asset_data(asset):
-    if asset is None:
-        return False
-
-    asset_data = None
     try:
         if isinstance(asset, unreal.AssetData):
-            asset_data = asset
-    except Exception:
-        asset_data = None
+            _log("AssetData conversion succeeded: selected item is already AssetData")
+            return asset
+    except Exception as exc:
+        _log_error(f"AssetData isinstance check failed: {exc}")
 
+    try:
+        asset_data = unreal.AssetRegistryHelpers.create_asset_data(asset)
+        if asset_data:
+            _log("AssetData conversion succeeded via AssetRegistryHelpers.create_asset_data")
+            return asset_data
+    except Exception as exc:
+        _log_error(f"AssetData conversion raised error: {exc}")
+
+    _log("AssetData conversion failed")
+    return None
+
+
+def _is_world_asset_data(asset_data):
     if asset_data is None:
+        _log("AssetData is None; cannot be an exact World asset")
         return False
 
     try:
         world_class_path = unreal.World.static_class().get_class_path_name()
-        asset_class_path = asset_data.asset_class_path
-        if world_class_path and asset_class_path:
-            if asset_class_path == world_class_path:
-                return True
-    except Exception:
-        pass
+    except Exception as exc:
+        _log_error(f"Could not read World class path: {exc}")
+        world_class_path = None
 
+    asset_class_path = None
+    try:
+        asset_class_path = asset_data.asset_class_path
+        _log(f"AssetData asset class path: {asset_class_path}")
+    except Exception as exc:
+        _log_error(f"Could not read AssetData asset_class_path: {exc}")
+
+    if world_class_path is not None and asset_class_path is not None:
+        if asset_class_path == world_class_path:
+            _log("Exact World class-path match succeeded")
+            return True
+        _log("Exact asset class path did not match World")
+
+    asset_class_name = None
     try:
         asset_class_name = str(asset_data.asset_class).strip()
+        _log(f"AssetData asset class name: {asset_class_name}")
         if asset_class_name == "World":
+            _log("Fallback exact asset class name match succeeded: World")
             return True
-    except Exception:
-        pass
+    except Exception as exc:
+        _log_error(f"Could not read AssetData asset_class: {exc}")
+
+    _log("Selected asset is not an exact World asset")
 
     return False
 
 
 def _is_world_asset(selected_asset):
-    return _is_world_asset_object(selected_asset) or _is_world_asset_data(selected_asset)
+    # Strict validation intentionally uses exact asset-registry identity only.
+    # Broad inheritance/object-instance checks (for example class_is_child_of or
+    # isinstance) are intentionally avoided because they can allow non-map assets
+    # such as Blueprints to pass in some editor contexts.
+    asset_data = _asset_data_from_anything(selected_asset)
+    return _is_world_asset_data(asset_data)
 
 
 def run(selected_assets):
@@ -121,7 +138,7 @@ def run(selected_assets):
         _log(f"Selected asset class name: {class_name}")
 
         is_world = _is_world_asset(selected_asset)
-        _log(f"Recognized as World asset: {is_world}")
+        _log(f"Exact World match succeeded: {is_world}")
 
         result = bool(is_world)
     except Exception as exc:
