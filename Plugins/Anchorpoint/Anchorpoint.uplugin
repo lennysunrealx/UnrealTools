@@ -1,0 +1,47 @@
+{
+	"FileVersion": 3,
+	"Version": 1,
+	"VersionName": "v0.59",
+	"FriendlyName": "Anchorpoint",
+	"Description": "Git-based revision control. Connects the Unreal Editor to Anchorpoint's desktop application.",
+	"Category": "Source Control",
+	"CreatedBy": "Anchorpoint Software GmbH",
+	"CreatedByURL": "www.anchorpoint.app",
+	"DocsURL": "https://docs.anchorpoint.app/git/unreal/",
+	"MarketplaceURL": "com.epicgames.launcher://ue/Fab/product/a1f11a3c-1b51-4417-9e2a-4ec1e60f7e67",
+	"SupportURL": "https://discord.com/invite/ZPyPzvx",
+	"EngineVersion": "5.7.0",
+	"CanContainContent": false,
+	"Installed": true,
+	"Modules": [
+		{
+			"Name": "Anchorpoint",
+			"Type": "Editor",
+			"LoadingPhase": "Default",
+			"PlatformAllowList": [
+				"Win64",
+				"Mac"
+			]
+		},
+		{
+			"Name": "AnchorpointCli",
+			"Type": "Editor",
+			"LoadingPhase": "Default",
+			"PlatformAllowList": [
+				"Win64",
+				"Mac"
+			]
+		},
+		{
+			"Name": "AnchorpointHacks",
+			"Type": "Editor",
+			"LoadingPhase": "Default"
+		}
+	],
+	"Plugins": [
+		{
+			"Name": "EditorScriptingUtilities",
+			"Enabled": true
+		}
+	]
+}
