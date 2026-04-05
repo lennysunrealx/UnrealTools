@@ -44,8 +44,8 @@ Content/*
 !Content/
 
 # Allow these folders themselves
-!Content/BlueprintTools/
-!Content/PythonTools/
+!Content/_Tools/
+!Content/_Tools/**
 
 # Allow everything inside them
 !Content/BlueprintTools/**
