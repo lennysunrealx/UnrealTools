@@ -8,8 +8,12 @@ def _log(message):
     unreal.log(f"{LOG_PREFIX} {message}")
 
 
+def _log_warning(message):
+    unreal.log_warning(f"{LOG_PREFIX} Warning: {message}")
+
+
 def _log_error(message):
-    unreal.log_error(f"{LOG_PREFIX} {message}")
+    unreal.log_error(f"{LOG_PREFIX} Error: {message}")
 
 
 def _sanitize_show_name(show_name):
@@ -130,7 +134,7 @@ def _convert_level_value_to_asset_path(level_value):
         if not cleaned or cleaned in ("None", "null"):
             return ""
         if cleaned.startswith("SoftObjectPath(") and cleaned.endswith(")"):
-            cleaned = cleaned[len("SoftObjectPath(") : -1].strip().strip("\"'")
+            cleaned = cleaned[len("SoftObjectPath("): -1].strip().strip("\"'")
         return cleaned
 
     if level_value is None:
@@ -179,11 +183,16 @@ def _get_level_path_for_shot(target_folder, shot_name):
     return level_path
 
 
+def _empty_result():
+    return [], [], [], [], 0
+
+
 def run(show_name, selected_sequence):
     shot_names = []
     start_frames = []
     end_frames = []
     level_paths = []
+    has_any_shots = 0
 
     sanitized_show_name = _sanitize_show_name(show_name)
     sanitized_selected_sequence = _sanitize_selected_sequence(selected_sequence)
@@ -195,11 +204,11 @@ def run(show_name, selected_sequence):
 
     if not sanitized_show_name:
         _log_error(f"Invalid show_name after sanitizing: '{show_name}'")
-        return [], [], [], []
+        return _empty_result()
 
     if not sanitized_selected_sequence:
         _log_error(f"Invalid selected_sequence after sanitizing: '{selected_sequence}'")
-        return [], [], [], []
+        return _empty_result()
 
     target_folder = f"/Game/_{sanitized_show_name}/Sequences/{sanitized_selected_sequence}"
     _log(f"Target folder: {target_folder}")
@@ -208,12 +217,12 @@ def run(show_name, selected_sequence):
 
     if not editor_asset_lib.does_directory_exist(target_folder):
         _log_error(f"Target folder does not exist: {target_folder}")
-        return [], [], [], []
+        return _empty_result()
 
     sequenceholder_path = f"{target_folder}/_sequenceholder"
     if not editor_asset_lib.does_asset_exist(sequenceholder_path):
         _log_error(f"Missing required '_sequenceholder' in folder: {sequenceholder_path}")
-        return [], [], [], []
+        return _empty_result()
 
     asset_paths = editor_asset_lib.list_assets(
         target_folder,
@@ -244,7 +253,7 @@ def run(show_name, selected_sequence):
 
         asset_obj = editor_asset_lib.load_asset(asset_path)
         if not asset_obj:
-            _log(f"Could not load asset: {asset_path}")
+            _log_warning(f"Could not load asset: {asset_path}")
             continue
 
         if not isinstance(asset_obj, unreal.LevelSequence):
@@ -262,7 +271,7 @@ def run(show_name, selected_sequence):
 
     if not valid_rows:
         _log(f"No valid shot Level Sequences found in {target_folder}")
-        return [], [], [], []
+        return _empty_result()
 
     valid_rows.sort(key=lambda row: row[0])
 
@@ -272,5 +281,7 @@ def run(show_name, selected_sequence):
         end_frames.append(playback_end)
         level_paths.append(level_path)
 
+    has_any_shots = 1
+
     _log(f"Returning {len(shot_names)} shot(s) from {target_folder}")
-    return shot_names, start_frames, end_frames, level_paths
+    return shot_names, start_frames, end_frames, level_paths, has_any_shots
