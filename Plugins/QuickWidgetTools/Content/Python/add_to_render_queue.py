@@ -213,13 +213,27 @@ def _find_movie_render_graph_asset(movie_render_graph):
             loaded_class_name = ""
 
         class_name_candidates = {registry_class_name, loaded_class_name}
+        normalized_class_names = {
+            class_name for class_name in class_name_candidates if class_name
+        }
         allowed_class_names = {
             "MovieGraphConfig",
             "MovieRenderGraphConfig",
             "MoviePipelineGraphConfig",
         }
+        looks_like_graph_class = any(
+            class_name in allowed_class_names
+            or "MovieGraph" in class_name
+            or "MovieRenderGraph" in class_name
+            for class_name in normalized_class_names
+        )
 
-        if not any(class_name in allowed_class_names for class_name in class_name_candidates if class_name):
+        _log(
+            f"Matched graph asset candidate: path='{object_path}', "
+            f"registry_class='{registry_class_name}', loaded_class='{loaded_class_name}'."
+        )
+
+        if not looks_like_graph_class:
             _log_warning(
                 f"Asset name matched '{movie_render_graph}' but class did not look like a Movie Render Graph "
                 f"(registry='{registry_class_name}', loaded='{loaded_class_name}'). Skipping."
@@ -235,7 +249,7 @@ def _find_movie_render_graph_asset(movie_render_graph):
     return None
 
 
-def _switch_job_to_movie_render_graph_mode(job, graph_asset):
+def _switch_job_to_movie_render_graph_mode(job):
     _log("Attempting to switch queue job to Movie Render Graph configuration mode.")
 
     method_candidates = [
@@ -243,9 +257,6 @@ def _switch_job_to_movie_render_graph_mode(job, graph_asset):
         ("job method", job, "set_use_movie_graph", [True]),
         ("job method", job, "enable_graph_configuration", []),
         ("job method", job, "switch_to_graph_configuration", []),
-        ("job method", job, "set_graph_preset", [graph_asset]),
-        ("job method", job, "set_graph_config", [graph_asset]),
-        ("job method", job, "set_movie_graph_config", [graph_asset]),
     ]
     for source, target, method_name, args in method_candidates:
         _log(f"Trying {source} '{method_name}()' to enable MRG mode.")
@@ -287,8 +298,6 @@ def _switch_job_to_movie_render_graph_mode(job, graph_asset):
                 ("configuration method", "set_use_graph_configuration", [True]),
                 ("configuration method", "set_use_movie_graph", [True]),
                 ("configuration method", "switch_to_graph_configuration", []),
-                ("configuration method", "set_graph_preset", [graph_asset]),
-                ("configuration method", "set_graph_config", [graph_asset]),
             ]
             for source, method_name, args in configuration_method_candidates:
                 _log(f"Trying {source} '{method_name}()' to enable MRG mode.")
@@ -305,7 +314,6 @@ def _switch_job_to_movie_render_graph_mode(job, graph_asset):
             configuration_property_candidates = [
                 ("configuration property", "use_graph_configuration", True),
                 ("configuration property", "use_movie_graph", True),
-                ("configuration property", "graph_preset", graph_asset),
             ]
             for source, prop_name, value in configuration_property_candidates:
                 _log(f"Trying {source} '{prop_name}' to enable MRG mode.")
@@ -321,6 +329,12 @@ def _switch_job_to_movie_render_graph_mode(job, graph_asset):
 
 
 def _assign_movie_render_graph_to_job(job, graph_asset):
+    graph_asset_path = ""
+    try:
+        graph_asset_path = graph_asset.get_path_name()
+    except Exception:
+        graph_asset_path = str(graph_asset)
+
     graph_property_candidates = [
         "graph_preset",
         "graph_config",
@@ -333,7 +347,10 @@ def _assign_movie_render_graph_to_job(job, graph_asset):
         _log(f"Trying graph assignment via job property '{prop_name}'.")
         try:
             job.set_editor_property(prop_name, graph_asset)
-            _log(f"Assigned Movie Render Graph using job property '{prop_name}'.")
+            _log(
+                f"Successfully assigned Movie Render Graph '{graph_asset_path}' "
+                f"using job property '{prop_name}'."
+            )
             return True
         except Exception:
             continue
@@ -344,7 +361,10 @@ def _assign_movie_render_graph_to_job(job, graph_asset):
         if callable(setter):
             try:
                 setter(graph_asset)
-                _log(f"Assigned Movie Render Graph using job method '{setter_name}()'.")
+                _log(
+                    f"Successfully assigned Movie Render Graph '{graph_asset_path}' "
+                    f"using job method '{setter_name}()'."
+                )
                 return True
             except Exception:
                 continue
@@ -470,7 +490,7 @@ def run(shot_name_array, is_active_array, is_hero_array, movie_render_graph):
             False, jobs_added, jobs_skipped, missing_shots, missing_data_assets, missing_levels, movie_render_graph_name
         )
 
-    seen_active_shots = set()
+    seen_shot_names = set()
 
     for idx, raw_shot_name in enumerate(shot_names):
         shot_name = _sanitize_shot_name(raw_shot_name)
@@ -488,11 +508,11 @@ def run(shot_name_array, is_active_array, is_hero_array, movie_render_graph):
             jobs_skipped += 1
             continue
 
-        if shot_name in seen_active_shots:
+        if shot_name in seen_shot_names:
             _log_warning(f"Skipping duplicate active shot '{shot_name}'.")
             jobs_skipped += 1
             continue
-        seen_active_shots.add(shot_name)
+        seen_shot_names.add(shot_name)
 
         level_sequence_object_path = _find_level_sequence_asset_path(shot_name)
         if not level_sequence_object_path:
@@ -535,7 +555,7 @@ def run(shot_name_array, is_active_array, is_hero_array, movie_render_graph):
             jobs_skipped += 1
             continue
 
-        if not _switch_job_to_movie_render_graph_mode(job, graph_asset):
+        if not _switch_job_to_movie_render_graph_mode(job):
             _log_error(f"Skipping shot '{shot_name}' because MRG mode switch failed.")
             jobs_skipped += 1
             continue
