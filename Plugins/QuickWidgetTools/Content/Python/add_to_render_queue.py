@@ -266,122 +266,26 @@ def _find_movie_render_graph_asset(movie_render_graph):
     return None
 
 
-def _switch_job_to_movie_render_graph_mode(job):
-    _log("Attempting to switch queue job to Movie Render Graph configuration mode.")
 
-    def _is_mrg_mode_enabled():
-        probes = [
-            ("job property", job, "use_graph_configuration"),
-            ("job property", job, "use_movie_graph"),
-            ("job property", job, "is_graph_configuration"),
-        ]
-
-        get_configuration_method = getattr(job, "get_configuration", None)
-        configuration_obj = None
-        if callable(get_configuration_method):
-            try:
-                configuration_obj = get_configuration_method()
-            except Exception:
-                configuration_obj = None
-
-        if configuration_obj:
-            probes.extend([
-                ("configuration property", configuration_obj, "use_graph_configuration"),
-                ("configuration property", configuration_obj, "use_movie_graph"),
-            ])
-
-        for source, target, prop_name in probes:
-            try:
-                value = target.get_editor_property(prop_name)
-            except Exception:
-                continue
-            if bool(value):
-                _log(f"MRG mode verification passed via {source} '{prop_name}'={value}.")
-                return True
-
-        return False
-
-    method_candidates = [
-        ("job method", job, "set_use_graph_configuration", [True]),
-        ("job method", job, "set_use_movie_graph", [True]),
-        ("job method", job, "enable_graph_configuration", []),
-        ("job method", job, "switch_to_graph_configuration", []),
-    ]
-    for source, target, method_name, args in method_candidates:
-        _log(f"Trying {source} '{method_name}()' to enable MRG mode.")
-        method = getattr(target, method_name, None)
-        if not callable(method):
-            continue
+def _is_job_using_graph_configuration(job):
+    checker = getattr(job, "is_using_graph_configuration", None)
+    if callable(checker):
         try:
-            method(*args)
-            if _is_mrg_mode_enabled():
-                _log(f"Movie Render Graph mode switch succeeded via {source} '{method_name}()'.")
+            value = bool(checker())
+            _log(f"Graph mode verification via job.is_using_graph_configuration(): {value}")
+            return value
+        except Exception:
+            pass
+
+    for prop_name in ("use_graph_configuration", "use_movie_graph", "is_graph_configuration"):
+        try:
+            value = bool(job.get_editor_property(prop_name))
+            _log(f"Graph mode fallback verification via job property '{prop_name}': {value}")
+            if value:
                 return True
-            _log_warning(f"{source} '{method_name}()' was called but MRG mode could not be verified.")
         except Exception:
             continue
 
-    property_candidates = [
-        ("job property", "use_graph_configuration", True),
-        ("job property", "use_movie_graph", True),
-        ("job property", "is_graph_configuration", True),
-        ("job property", "configuration_mode", "GRAPH"),
-    ]
-    for source, prop_name, value in property_candidates:
-        _log(f"Trying {source} '{prop_name}' to enable MRG mode.")
-        try:
-            job.set_editor_property(prop_name, value)
-            if _is_mrg_mode_enabled():
-                _log(f"Movie Render Graph mode switch succeeded via {source} '{prop_name}'.")
-                return True
-            _log_warning(f"{source} '{prop_name}' was set but MRG mode could not be verified.")
-        except Exception:
-            continue
-
-    get_configuration_method = getattr(job, "get_configuration", None)
-    if callable(get_configuration_method):
-        _log("Trying configuration object methods/properties to enable MRG mode.")
-        try:
-            configuration_obj = get_configuration_method()
-        except Exception:
-            configuration_obj = None
-
-        if configuration_obj:
-            configuration_method_candidates = [
-                ("configuration method", "set_use_graph_configuration", [True]),
-                ("configuration method", "set_use_movie_graph", [True]),
-                ("configuration method", "switch_to_graph_configuration", []),
-            ]
-            for source, method_name, args in configuration_method_candidates:
-                _log(f"Trying {source} '{method_name}()' to enable MRG mode.")
-                method = getattr(configuration_obj, method_name, None)
-                if not callable(method):
-                    continue
-                try:
-                    method(*args)
-                    if _is_mrg_mode_enabled():
-                        _log(f"Movie Render Graph mode switch succeeded via {source} '{method_name}()'.")
-                        return True
-                    _log_warning(f"{source} '{method_name}()' was called but MRG mode could not be verified.")
-                except Exception:
-                    continue
-
-            configuration_property_candidates = [
-                ("configuration property", "use_graph_configuration", True),
-                ("configuration property", "use_movie_graph", True),
-            ]
-            for source, prop_name, value in configuration_property_candidates:
-                _log(f"Trying {source} '{prop_name}' to enable MRG mode.")
-                try:
-                    configuration_obj.set_editor_property(prop_name, value)
-                    if _is_mrg_mode_enabled():
-                        _log(f"Movie Render Graph mode switch succeeded via {source} '{prop_name}'.")
-                        return True
-                    _log_warning(f"{source} '{prop_name}' was set but MRG mode could not be verified.")
-                except Exception:
-                    continue
-
-    _log_error("Unable to switch queue job to Movie Render Graph configuration mode.")
     return False
 
 
@@ -407,6 +311,7 @@ def _remove_job_from_queue(queue, job, shot_name, reason):
     )
 
 
+
 def _assign_movie_render_graph_to_job(job, graph_asset):
     graph_asset_path = ""
     try:
@@ -414,7 +319,17 @@ def _assign_movie_render_graph_to_job(job, graph_asset):
     except Exception:
         graph_asset_path = str(graph_asset)
 
-    def _is_graph_assignment_verified(target_obj, target_label):
+    def _same_asset(candidate):
+        if candidate == graph_asset:
+            return True
+        try:
+            return bool(candidate) and candidate.get_path_name() == graph_asset_path
+        except Exception:
+            return False
+
+    def _verify_assignment(target_obj, target_label):
+        verified_asset = False
+
         for getter_name in ("get_graph_preset", "get_graph_config"):
             getter = getattr(target_obj, getter_name, None)
             if not callable(getter):
@@ -423,12 +338,15 @@ def _assign_movie_render_graph_to_job(job, graph_asset):
                 assigned_asset = getter()
             except Exception:
                 continue
-            if assigned_asset == graph_asset:
+
+            if _same_asset(assigned_asset):
                 _log(
                     f"Movie Render Graph assignment verified on {target_label} "
                     f"via method '{getter_name}()'."
                 )
-                return True
+                verified_asset = True
+                break
+
             try:
                 assigned_path = assigned_asset.get_path_name() if assigned_asset else "None"
             except Exception:
@@ -438,118 +356,104 @@ def _assign_movie_render_graph_to_job(job, graph_asset):
                 f"returned '{assigned_path}'."
             )
 
-        for prop_name in ("graph_preset", "graph_config", "movie_graph_config", "movie_render_graph", "graph"):
-            try:
-                assigned_asset = target_obj.get_editor_property(prop_name)
-            except Exception:
-                continue
-            if assigned_asset == graph_asset:
-                _log(
-                    f"Movie Render Graph assignment verified on {target_label} "
-                    f"via property '{prop_name}'."
-                )
-                return True
-            try:
-                assigned_path = assigned_asset.get_path_name() if assigned_asset else "None"
-            except Exception:
-                assigned_path = str(assigned_asset)
-            _log(
-                f"Verification probe on {target_label} via property '{prop_name}' "
-                f"returned '{assigned_path}'."
-            )
+        graph_mode_enabled = True
+        if target_obj is job:
+            graph_mode_enabled = _is_job_using_graph_configuration(job)
 
+        if verified_asset and graph_mode_enabled:
+            return True
+
+        if verified_asset and not graph_mode_enabled:
+            _log_warning(
+                f"Graph asset was assigned on {target_label}, but graph configuration mode could not be verified."
+            )
         return False
 
-    for setter_name in ("set_graph_preset", "set_graph_config"):
-        _log(f"Trying graph assignment via job method '{setter_name}()'.")
-        setter = getattr(job, setter_name, None)
-        if callable(setter):
-            try:
-                setter(graph_asset)
-                if _is_graph_assignment_verified(job, "job"):
-                    _log(
-                        f"Successfully assigned Movie Render Graph '{graph_asset_path}' "
-                        f"using job method '{setter_name}()'."
-                    )
-                    return True
-                _log_warning(
-                    f"Job method '{setter_name}()' executed but assignment could not be verified."
-                )
-            except Exception:
-                continue
+    setter_attempts = [
+        ("job method", job, "set_graph_preset"),
+        ("job method", job, "set_graph_config"),
+    ]
 
     get_configuration_method = getattr(job, "get_configuration", None)
+    configuration_obj = None
     if callable(get_configuration_method):
         try:
             configuration_obj = get_configuration_method()
         except Exception:
             configuration_obj = None
 
-        if configuration_obj:
-            for setter_name in ("set_graph_preset", "set_graph_config"):
-                _log(f"Trying graph assignment via configuration method '{setter_name}()'.")
-                setter = getattr(configuration_obj, setter_name, None)
-                if callable(setter):
-                    try:
-                        setter(graph_asset)
-                        if _is_graph_assignment_verified(configuration_obj, "configuration"):
-                            _log(
-                                f"Successfully assigned Movie Render Graph '{graph_asset_path}' "
-                                f"using configuration method '{setter_name}()'."
-                            )
-                            return True
-                        _log_warning(
-                            f"Configuration method '{setter_name}()' executed but assignment could not be verified."
-                        )
-                    except Exception:
-                        continue
+    if configuration_obj:
+        setter_attempts.extend([
+            ("configuration method", configuration_obj, "set_graph_preset"),
+            ("configuration method", configuration_obj, "set_graph_config"),
+        ])
 
-    _log("Falling back to editor property graph assignment (undocumented path).")
-    graph_property_candidates = [
-        "graph_preset",
-        "graph_config",
-        "movie_graph_config",
-        "movie_render_graph",
-        "graph",
-    ]
-    for prop_name in graph_property_candidates:
-        _log(f"Trying graph assignment via job property '{prop_name}' (fallback).")
+    for source, target_obj, setter_name in setter_attempts:
+        setter = getattr(target_obj, setter_name, None)
+        if not callable(setter):
+            continue
+
+        _log(f"Trying graph assignment via {source} '{setter_name}()'.")
         try:
-            job.set_editor_property(prop_name, graph_asset)
-            if _is_graph_assignment_verified(job, "job"):
-                _log(
-                    f"Successfully assigned Movie Render Graph '{graph_asset_path}' "
-                    f"using job property '{prop_name}' (fallback)."
-                )
-                return True
-            _log_warning(
-                f"Job property '{prop_name}' was set but assignment could not be verified."
-            )
+            setter(graph_asset)
+        except TypeError:
+            if setter_name == "set_graph_preset":
+                try:
+                    setter(graph_asset, True)
+                except Exception:
+                    continue
+            else:
+                continue
         except Exception:
             continue
 
-    if callable(get_configuration_method):
-        try:
-            configuration_obj = get_configuration_method()
-        except Exception:
-            configuration_obj = None
+        verify_label = "job" if target_obj is job else "configuration"
+        if _verify_assignment(target_obj, verify_label):
+            _log(
+                f"Successfully assigned Movie Render Graph '{graph_asset_path}' "
+                f"using {source} '{setter_name}()'."
+            )
+            return True
 
-        if configuration_obj:
-            for prop_name in ("graph_preset", "graph_config", "movie_graph_config", "movie_render_graph", "graph"):
-                _log(f"Trying graph assignment via configuration property '{prop_name}' (fallback).")
-                try:
-                    configuration_obj.set_editor_property(prop_name, graph_asset)
-                    if _is_graph_assignment_verified(configuration_obj, "configuration"):
-                        _log(
-                            f"Successfully assigned Movie Render Graph '{graph_asset_path}' "
-                            f"using configuration property '{prop_name}' (fallback)."
-                        )
-                        return True
-                    _log_warning(
-                        f"Configuration property '{prop_name}' was set but assignment could not be verified."
-                    )
-                except Exception:
-                    continue
+        _log_warning(
+            f"{source} '{setter_name}()' executed but assignment could not be fully verified."
+        )
+
+    _log("Falling back to editor property graph assignment (undocumented path).")
+    fallback_attempts = [
+        ("job property", job, "graph_preset"),
+        ("job property", job, "graph_config"),
+        ("job property", job, "movie_graph_config"),
+        ("job property", job, "movie_render_graph"),
+        ("job property", job, "graph"),
+    ]
+    if configuration_obj:
+        fallback_attempts.extend([
+            ("configuration property", configuration_obj, "graph_preset"),
+            ("configuration property", configuration_obj, "graph_config"),
+            ("configuration property", configuration_obj, "movie_graph_config"),
+            ("configuration property", configuration_obj, "movie_render_graph"),
+            ("configuration property", configuration_obj, "graph"),
+        ])
+
+    for source, target_obj, prop_name in fallback_attempts:
+        _log(f"Trying graph assignment via {source} '{prop_name}' (fallback).")
+        try:
+            target_obj.set_editor_property(prop_name, graph_asset)
+        except Exception:
+            continue
+
+        verify_label = "job" if target_obj is job else "configuration"
+        if _verify_assignment(target_obj, verify_label):
+            _log(
+                f"Successfully assigned Movie Render Graph '{graph_asset_path}' "
+                f"using {source} '{prop_name}' (fallback)."
+            )
+            return True
+
+        _log_warning(
+            f"{source} '{prop_name}' was set but assignment could not be fully verified."
+        )
 
     _log_error("Unable to assign Movie Render Graph to queue job (no supported property/method found).")
     return False
@@ -622,19 +526,6 @@ def _format_summary_string(result):
     return summary
 
 
-def _build_result_summary(success, jobs_added, jobs_skipped, missing_shots, missing_data_assets, missing_levels, movie_render_graph_name):
-    summary = (
-        f"success={1 if success else 0};"
-        f"jobs_added={jobs_added};"
-        f"jobs_skipped={jobs_skipped};"
-        f"missing_shots={','.join(missing_shots)};"
-        f"missing_data_assets={','.join(missing_data_assets)};"
-        f"missing_levels={','.join(missing_levels)};"
-        f"movie_render_graph={movie_render_graph_name}"
-    )
-    _log(f"Returned summary string: {summary}")
-    return summary
-
 
 def run(shot_name_array, is_active_array, is_hero_array, movie_render_graph):
     movie_render_graph_name = str(movie_render_graph or "").strip()
@@ -643,15 +534,6 @@ def run(shot_name_array, is_active_array, is_hero_array, movie_render_graph):
     missing_shots = []
     missing_data_assets = []
     missing_levels = []
-    result = {
-        "success": False,
-        "jobs_added": jobs_added,
-        "jobs_skipped": jobs_skipped,
-        "missing_shots": missing_shots,
-        "missing_data_assets": missing_data_assets,
-        "missing_levels": missing_levels,
-        "movie_render_graph_name": movie_render_graph_name,
-    }
 
     shot_names = [str(v) for v in list(shot_name_array or [])]
     active_values = list(is_active_array or [])
@@ -668,28 +550,68 @@ def run(shot_name_array, is_active_array, is_hero_array, movie_render_graph):
 
     if not movie_render_graph:
         _log_error("movie_render_graph is empty.")
-        return _format_summary_string(result)
+        return _format_summary_string({
+            'success': False,
+            'jobs_added': jobs_added,
+            'jobs_skipped': jobs_skipped,
+            'missing_shots': missing_shots,
+            'missing_data_assets': missing_data_assets,
+            'missing_levels': missing_levels,
+            'movie_render_graph_name': movie_render_graph_name,
+        })
 
     if len(shot_names) != len(active_values) or len(shot_names) != len(hero_values):
         _log_error("Array length mismatch: shot_name_array, is_active_array, and is_hero_array must match.")
-        return _format_summary_string(result)
+        return _format_summary_string({
+            'success': False,
+            'jobs_added': jobs_added,
+            'jobs_skipped': jobs_skipped,
+            'missing_shots': missing_shots,
+            'missing_data_assets': missing_data_assets,
+            'missing_levels': missing_levels,
+            'movie_render_graph_name': movie_render_graph_name,
+        })
 
     graph_asset = _find_movie_render_graph_asset(movie_render_graph)
     if not graph_asset:
         _log_error(
             f"Movie Render Graph '{movie_render_graph}' was not found under '{MRG_SETTINGS_FOLDER}'."
         )
-        return _format_summary_string(result)
+        return _format_summary_string({
+            'success': False,
+            'jobs_added': jobs_added,
+            'jobs_skipped': jobs_skipped,
+            'missing_shots': missing_shots,
+            'missing_data_assets': missing_data_assets,
+            'missing_levels': missing_levels,
+            'movie_render_graph_name': movie_render_graph_name,
+        })
 
     queue_subsystem = unreal.get_editor_subsystem(unreal.MoviePipelineQueueSubsystem)
     if not queue_subsystem:
         _log_error("Unable to resolve MoviePipelineQueueSubsystem.")
-        return _format_summary_string(result)
+        return _format_summary_string({
+            'success': False,
+            'jobs_added': jobs_added,
+            'jobs_skipped': jobs_skipped,
+            'missing_shots': missing_shots,
+            'missing_data_assets': missing_data_assets,
+            'missing_levels': missing_levels,
+            'movie_render_graph_name': movie_render_graph_name,
+        })
 
     queue = queue_subsystem.get_queue()
     if not queue:
         _log_error("Unable to access Movie Render Queue.")
-        return _format_summary_string(result)
+        return _format_summary_string({
+            'success': False,
+            'jobs_added': jobs_added,
+            'jobs_skipped': jobs_skipped,
+            'missing_shots': missing_shots,
+            'missing_data_assets': missing_data_assets,
+            'missing_levels': missing_levels,
+            'movie_render_graph_name': movie_render_graph_name,
+        })
 
     seen_shot_names = set()
 
@@ -757,12 +679,6 @@ def run(shot_name_array, is_active_array, is_hero_array, movie_render_graph):
             jobs_skipped += 1
             continue
 
-        if not _switch_job_to_movie_render_graph_mode(job):
-            _log_error(f"Skipping shot '{shot_name}' because MRG mode switch failed.")
-            _remove_job_from_queue(queue, job, shot_name, "MRG mode switch failed")
-            jobs_skipped += 1
-            continue
-
         if not _assign_movie_render_graph_to_job(job, graph_asset):
             _remove_job_from_queue(queue, job, shot_name, "MRG asset assignment failed")
             jobs_skipped += 1
@@ -775,9 +691,6 @@ def run(shot_name_array, is_active_array, is_hero_array, movie_render_graph):
         )
 
     success = jobs_added > 0
-    result["success"] = success
-    result["jobs_added"] = jobs_added
-    result["jobs_skipped"] = jobs_skipped
     _log(
         "Summary: success={0}, jobs_added={1}, jobs_skipped={2}, missing_shots={3}, "
         "missing_data_assets={4}, missing_levels={5}, movie_render_graph='{6}'".format(
@@ -791,4 +704,12 @@ def run(shot_name_array, is_active_array, is_hero_array, movie_render_graph):
         )
     )
 
-    return _format_summary_string(result)
+    return _format_summary_string({
+        "success": success,
+        "jobs_added": jobs_added,
+        "jobs_skipped": jobs_skipped,
+        "missing_shots": missing_shots,
+        "missing_data_assets": missing_data_assets,
+        "missing_levels": missing_levels,
+        "movie_render_graph_name": movie_render_graph_name,
+    })
