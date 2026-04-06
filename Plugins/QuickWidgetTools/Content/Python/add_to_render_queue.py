@@ -176,6 +176,7 @@ def _find_movie_render_graph_asset(movie_render_graph):
         _log_error(f"Movie Render Graph folder not found: {MRG_SETTINGS_FOLDER}")
         return None
 
+    asset_registry = unreal.AssetRegistryHelpers.get_asset_registry()
     candidates = editor_asset_lib.list_assets(
         MRG_SETTINGS_FOLDER,
         recursive=True,
@@ -188,12 +189,135 @@ def _find_movie_render_graph_asset(movie_render_graph):
         if asset_name != movie_render_graph:
             continue
 
+        graph_asset_data = None
+        try:
+            graph_asset_data = asset_registry.get_asset_by_object_path(unreal.Name(object_path))
+        except Exception:
+            graph_asset_data = None
+
+        registry_class_name = ""
+        if graph_asset_data and graph_asset_data.is_valid():
+            try:
+                registry_class_name = str(graph_asset_data.asset_class_path.asset_name)
+            except Exception:
+                registry_class_name = ""
+
         graph_asset = unreal.load_asset(object_path)
-        if graph_asset:
-            _log(f"Selected Movie Render Graph asset: {object_path}")
-            return graph_asset
+        if not graph_asset:
+            continue
+
+        loaded_class_name = ""
+        try:
+            loaded_class_name = graph_asset.get_class().get_name()
+        except Exception:
+            loaded_class_name = ""
+
+        class_name_candidates = {registry_class_name, loaded_class_name}
+        allowed_class_names = {
+            "MovieGraphConfig",
+            "MovieRenderGraphConfig",
+            "MoviePipelineGraphConfig",
+        }
+
+        if not any(class_name in allowed_class_names for class_name in class_name_candidates if class_name):
+            _log_warning(
+                f"Asset name matched '{movie_render_graph}' but class did not look like a Movie Render Graph "
+                f"(registry='{registry_class_name}', loaded='{loaded_class_name}'). Skipping."
+            )
+            continue
+
+        _log(
+            f"Selected Movie Render Graph asset: {object_path} "
+            f"(registry_class='{registry_class_name}', loaded_class='{loaded_class_name}')."
+        )
+        return graph_asset
 
     return None
+
+
+def _switch_job_to_movie_render_graph_mode(job, graph_asset):
+    _log("Attempting to switch queue job to Movie Render Graph configuration mode.")
+
+    method_candidates = [
+        ("job method", job, "set_use_graph_configuration", [True]),
+        ("job method", job, "set_use_movie_graph", [True]),
+        ("job method", job, "enable_graph_configuration", []),
+        ("job method", job, "switch_to_graph_configuration", []),
+        ("job method", job, "set_graph_preset", [graph_asset]),
+        ("job method", job, "set_graph_config", [graph_asset]),
+        ("job method", job, "set_movie_graph_config", [graph_asset]),
+    ]
+    for source, target, method_name, args in method_candidates:
+        _log(f"Trying {source} '{method_name}()' to enable MRG mode.")
+        method = getattr(target, method_name, None)
+        if not callable(method):
+            continue
+        try:
+            method(*args)
+            _log(f"Movie Render Graph mode switch succeeded via {source} '{method_name}()'.")
+            return True
+        except Exception:
+            continue
+
+    property_candidates = [
+        ("job property", "use_graph_configuration", True),
+        ("job property", "use_movie_graph", True),
+        ("job property", "is_graph_configuration", True),
+        ("job property", "configuration_mode", "GRAPH"),
+    ]
+    for source, prop_name, value in property_candidates:
+        _log(f"Trying {source} '{prop_name}' to enable MRG mode.")
+        try:
+            job.set_editor_property(prop_name, value)
+            _log(f"Movie Render Graph mode switch succeeded via {source} '{prop_name}'.")
+            return True
+        except Exception:
+            continue
+
+    get_configuration_method = getattr(job, "get_configuration", None)
+    if callable(get_configuration_method):
+        _log("Trying configuration object methods/properties to enable MRG mode.")
+        try:
+            configuration_obj = get_configuration_method()
+        except Exception:
+            configuration_obj = None
+
+        if configuration_obj:
+            configuration_method_candidates = [
+                ("configuration method", "set_use_graph_configuration", [True]),
+                ("configuration method", "set_use_movie_graph", [True]),
+                ("configuration method", "switch_to_graph_configuration", []),
+                ("configuration method", "set_graph_preset", [graph_asset]),
+                ("configuration method", "set_graph_config", [graph_asset]),
+            ]
+            for source, method_name, args in configuration_method_candidates:
+                _log(f"Trying {source} '{method_name}()' to enable MRG mode.")
+                method = getattr(configuration_obj, method_name, None)
+                if not callable(method):
+                    continue
+                try:
+                    method(*args)
+                    _log(f"Movie Render Graph mode switch succeeded via {source} '{method_name}()'.")
+                    return True
+                except Exception:
+                    continue
+
+            configuration_property_candidates = [
+                ("configuration property", "use_graph_configuration", True),
+                ("configuration property", "use_movie_graph", True),
+                ("configuration property", "graph_preset", graph_asset),
+            ]
+            for source, prop_name, value in configuration_property_candidates:
+                _log(f"Trying {source} '{prop_name}' to enable MRG mode.")
+                try:
+                    configuration_obj.set_editor_property(prop_name, value)
+                    _log(f"Movie Render Graph mode switch succeeded via {source} '{prop_name}'.")
+                    return True
+                except Exception:
+                    continue
+
+    _log_error("Unable to switch queue job to Movie Render Graph configuration mode.")
+    return False
 
 
 def _assign_movie_render_graph_to_job(job, graph_asset):
@@ -206,6 +330,7 @@ def _assign_movie_render_graph_to_job(job, graph_asset):
     ]
 
     for prop_name in graph_property_candidates:
+        _log(f"Trying graph assignment via job property '{prop_name}'.")
         try:
             job.set_editor_property(prop_name, graph_asset)
             _log(f"Assigned Movie Render Graph using job property '{prop_name}'.")
@@ -214,6 +339,7 @@ def _assign_movie_render_graph_to_job(job, graph_asset):
             continue
 
     for setter_name in ("set_graph_preset", "set_graph_config", "set_movie_graph_config"):
+        _log(f"Trying graph assignment via job method '{setter_name}()'.")
         setter = getattr(job, setter_name, None)
         if callable(setter):
             try:
@@ -228,16 +354,23 @@ def _assign_movie_render_graph_to_job(job, graph_asset):
 
 
 def _set_job_sequence_and_map(job, level_sequence_object_path, map_object_path):
+    _log(f"Attempting sequence assignment from object path: {level_sequence_object_path}")
+    _log(f"Attempting map assignment from object path: {map_object_path}")
+
     sequence_soft_path = unreal.SoftObjectPath(level_sequence_object_path)
     map_soft_path = unreal.SoftObjectPath(map_object_path)
 
     sequence_assigned = False
     map_assigned = False
+    sequence_property_name = ""
+    map_property_name = ""
 
     for prop_name in ("sequence", "sequence_path"):
         try:
             job.set_editor_property(prop_name, sequence_soft_path)
             sequence_assigned = True
+            sequence_property_name = prop_name
+            _log(f"Assigned sequence using job property '{prop_name}'.")
             break
         except Exception:
             continue
@@ -246,27 +379,48 @@ def _set_job_sequence_and_map(job, level_sequence_object_path, map_object_path):
         try:
             job.set_editor_property(prop_name, map_soft_path)
             map_assigned = True
+            map_property_name = prop_name
+            _log(f"Assigned map using job property '{prop_name}'.")
             break
         except Exception:
             continue
 
+    if sequence_assigned and map_assigned:
+        _log(
+            f"Sequence/map assignment succeeded (sequence_prop='{sequence_property_name}', "
+            f"map_prop='{map_property_name}', sequence='{level_sequence_object_path}', map='{map_object_path}')."
+        )
+    else:
+        _log_warning(
+            f"Sequence/map assignment failed (sequence_assigned={sequence_assigned}, map_assigned={map_assigned}, "
+            f"sequence_prop='{sequence_property_name}', map_prop='{map_property_name}', "
+            f"sequence='{level_sequence_object_path}', map='{map_object_path}')."
+        )
+
     return sequence_assigned and map_assigned
 
 
-def _new_result(movie_render_graph_name):
-    return {
-        "success": False,
-        "jobs_added": 0,
-        "jobs_skipped": 0,
-        "missing_shots": [],
-        "missing_data_assets": [],
-        "missing_levels": [],
-        "movie_render_graph": movie_render_graph_name,
-    }
+def _build_result_summary(success, jobs_added, jobs_skipped, missing_shots, missing_data_assets, missing_levels, movie_render_graph_name):
+    summary = (
+        f"success={1 if success else 0};"
+        f"jobs_added={jobs_added};"
+        f"jobs_skipped={jobs_skipped};"
+        f"missing_shots={','.join(missing_shots)};"
+        f"missing_data_assets={','.join(missing_data_assets)};"
+        f"missing_levels={','.join(missing_levels)};"
+        f"movie_render_graph={movie_render_graph_name}"
+    )
+    _log(f"Returned summary string: {summary}")
+    return summary
 
 
 def run(shot_name_array, is_active_array, is_hero_array, movie_render_graph):
-    result = _new_result(str(movie_render_graph or ""))
+    movie_render_graph_name = str(movie_render_graph or "")
+    jobs_added = 0
+    jobs_skipped = 0
+    missing_shots = []
+    missing_data_assets = []
+    missing_levels = []
 
     shot_names = [str(v) for v in list(shot_name_array or [])]
     active_values = list(is_active_array or [])
@@ -283,28 +437,40 @@ def run(shot_name_array, is_active_array, is_hero_array, movie_render_graph):
 
     if not movie_render_graph:
         _log_error("movie_render_graph is empty.")
-        return result
+        return _build_result_summary(
+            False, jobs_added, jobs_skipped, missing_shots, missing_data_assets, missing_levels, movie_render_graph_name
+        )
 
     if len(shot_names) != len(active_values) or len(shot_names) != len(hero_values):
         _log_error("Array length mismatch: shot_name_array, is_active_array, and is_hero_array must match.")
-        return result
+        return _build_result_summary(
+            False, jobs_added, jobs_skipped, missing_shots, missing_data_assets, missing_levels, movie_render_graph_name
+        )
 
     graph_asset = _find_movie_render_graph_asset(movie_render_graph)
     if not graph_asset:
         _log_error(
             f"Movie Render Graph '{movie_render_graph}' was not found under '{MRG_SETTINGS_FOLDER}'."
         )
-        return result
+        return _build_result_summary(
+            False, jobs_added, jobs_skipped, missing_shots, missing_data_assets, missing_levels, movie_render_graph_name
+        )
 
     queue_subsystem = unreal.get_editor_subsystem(unreal.MoviePipelineQueueSubsystem)
     if not queue_subsystem:
         _log_error("Unable to resolve MoviePipelineQueueSubsystem.")
-        return result
+        return _build_result_summary(
+            False, jobs_added, jobs_skipped, missing_shots, missing_data_assets, missing_levels, movie_render_graph_name
+        )
 
     queue = queue_subsystem.get_queue()
     if not queue:
         _log_error("Unable to access Movie Render Queue.")
-        return result
+        return _build_result_summary(
+            False, jobs_added, jobs_skipped, missing_shots, missing_data_assets, missing_levels, movie_render_graph_name
+        )
+
+    seen_active_shots = set()
 
     for idx, raw_shot_name in enumerate(shot_names):
         shot_name = _sanitize_shot_name(raw_shot_name)
@@ -314,40 +480,46 @@ def run(shot_name_array, is_active_array, is_hero_array, movie_render_graph):
 
         if not _is_shot_name_valid(shot_name):
             _log_warning(f"Skipping malformed shot name at index {idx}: '{raw_shot_name}'")
-            result["jobs_skipped"] += 1
+            jobs_skipped += 1
             continue
 
         if is_active != 1:
             _log(f"Skipping inactive shot '{shot_name}' (is_active={is_active}).")
-            result["jobs_skipped"] += 1
+            jobs_skipped += 1
             continue
+
+        if shot_name in seen_active_shots:
+            _log_warning(f"Skipping duplicate active shot '{shot_name}'.")
+            jobs_skipped += 1
+            continue
+        seen_active_shots.add(shot_name)
 
         level_sequence_object_path = _find_level_sequence_asset_path(shot_name)
         if not level_sequence_object_path:
             _log_warning(f"Shot sequence not found for '{shot_name}'.")
-            result["missing_shots"].append(shot_name)
-            result["jobs_skipped"] += 1
+            missing_shots.append(shot_name)
+            jobs_skipped += 1
             continue
 
         data_asset_object_path = _build_shot_data_asset_object_path(level_sequence_object_path, shot_name)
         shot_data_asset = _load_shot_data_asset(data_asset_object_path)
         if not shot_data_asset:
             _log_warning(f"Shot data asset not found for '{shot_name}': {data_asset_object_path}")
-            result["missing_data_assets"].append(shot_name)
-            result["jobs_skipped"] += 1
+            missing_data_assets.append(shot_name)
+            jobs_skipped += 1
             continue
 
         associated_level_object_path = _extract_associated_level_object_path(shot_data_asset)
         if not associated_level_object_path:
             _log_warning(f"AssociatedLevel is missing/invalid for '{shot_name}'.")
-            result["missing_levels"].append(shot_name)
-            result["jobs_skipped"] += 1
+            missing_levels.append(shot_name)
+            jobs_skipped += 1
             continue
 
         job = queue.allocate_new_job(unreal.MoviePipelineExecutorJob)
         if not job:
             _log_error(f"Failed to allocate queue job for shot '{shot_name}'.")
-            result["jobs_skipped"] += 1
+            jobs_skipped += 1
             continue
 
         try:
@@ -360,31 +532,44 @@ def run(shot_name_array, is_active_array, is_hero_array, movie_render_graph):
                 f"Failed to assign sequence/map for shot '{shot_name}'. "
                 f"Sequence='{level_sequence_object_path}', Map='{associated_level_object_path}'"
             )
-            result["jobs_skipped"] += 1
+            jobs_skipped += 1
+            continue
+
+        if not _switch_job_to_movie_render_graph_mode(job, graph_asset):
+            _log_error(f"Skipping shot '{shot_name}' because MRG mode switch failed.")
+            jobs_skipped += 1
             continue
 
         if not _assign_movie_render_graph_to_job(job, graph_asset):
-            result["jobs_skipped"] += 1
+            jobs_skipped += 1
             continue
 
-        result["jobs_added"] += 1
+        jobs_added += 1
         _log(
             f"Added queue job for '{shot_name}' "
             f"(Sequence='{level_sequence_object_path}', Map='{associated_level_object_path}')."
         )
 
-    result["success"] = result["jobs_added"] > 0
+    success = jobs_added > 0
     _log(
         "Summary: success={0}, jobs_added={1}, jobs_skipped={2}, missing_shots={3}, "
         "missing_data_assets={4}, missing_levels={5}, movie_render_graph='{6}'".format(
-            result["success"],
-            result["jobs_added"],
-            result["jobs_skipped"],
-            result["missing_shots"],
-            result["missing_data_assets"],
-            result["missing_levels"],
-            result["movie_render_graph"],
+            success,
+            jobs_added,
+            jobs_skipped,
+            missing_shots,
+            missing_data_assets,
+            missing_levels,
+            movie_render_graph_name,
         )
     )
 
-    return result
+    return _build_result_summary(
+        success,
+        jobs_added,
+        jobs_skipped,
+        missing_shots,
+        missing_data_assets,
+        missing_levels,
+        movie_render_graph_name,
+    )
