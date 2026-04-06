@@ -608,6 +608,20 @@ def _set_job_sequence_and_map(job, level_sequence_object_path, map_object_path):
     return sequence_assigned and map_assigned
 
 
+def _format_summary_string(result):
+    summary = (
+        f"success={1 if result.get('success') else 0};"
+        f"jobs_added={result.get('jobs_added', 0)};"
+        f"jobs_skipped={result.get('jobs_skipped', 0)};"
+        f"missing_shots={','.join(result.get('missing_shots', []))};"
+        f"missing_data_assets={','.join(result.get('missing_data_assets', []))};"
+        f"missing_levels={','.join(result.get('missing_levels', []))};"
+        f"movie_render_graph={result.get('movie_render_graph_name', '')}"
+    )
+    _log(f"Returned summary string: {summary}")
+    return summary
+
+
 def _build_result_summary(success, jobs_added, jobs_skipped, missing_shots, missing_data_assets, missing_levels, movie_render_graph_name):
     summary = (
         f"success={1 if success else 0};"
@@ -629,6 +643,15 @@ def run(shot_name_array, is_active_array, is_hero_array, movie_render_graph):
     missing_shots = []
     missing_data_assets = []
     missing_levels = []
+    result = {
+        "success": False,
+        "jobs_added": jobs_added,
+        "jobs_skipped": jobs_skipped,
+        "missing_shots": missing_shots,
+        "missing_data_assets": missing_data_assets,
+        "missing_levels": missing_levels,
+        "movie_render_graph_name": movie_render_graph_name,
+    }
 
     shot_names = [str(v) for v in list(shot_name_array or [])]
     active_values = list(is_active_array or [])
@@ -645,38 +668,28 @@ def run(shot_name_array, is_active_array, is_hero_array, movie_render_graph):
 
     if not movie_render_graph:
         _log_error("movie_render_graph is empty.")
-        return _build_result_summary(
-            False, jobs_added, jobs_skipped, missing_shots, missing_data_assets, missing_levels, movie_render_graph_name
-        )
+        return _format_summary_string(result)
 
     if len(shot_names) != len(active_values) or len(shot_names) != len(hero_values):
         _log_error("Array length mismatch: shot_name_array, is_active_array, and is_hero_array must match.")
-        return _build_result_summary(
-            False, jobs_added, jobs_skipped, missing_shots, missing_data_assets, missing_levels, movie_render_graph_name
-        )
+        return _format_summary_string(result)
 
     graph_asset = _find_movie_render_graph_asset(movie_render_graph)
     if not graph_asset:
         _log_error(
             f"Movie Render Graph '{movie_render_graph}' was not found under '{MRG_SETTINGS_FOLDER}'."
         )
-        return _build_result_summary(
-            False, jobs_added, jobs_skipped, missing_shots, missing_data_assets, missing_levels, movie_render_graph_name
-        )
+        return _format_summary_string(result)
 
     queue_subsystem = unreal.get_editor_subsystem(unreal.MoviePipelineQueueSubsystem)
     if not queue_subsystem:
         _log_error("Unable to resolve MoviePipelineQueueSubsystem.")
-        return _build_result_summary(
-            False, jobs_added, jobs_skipped, missing_shots, missing_data_assets, missing_levels, movie_render_graph_name
-        )
+        return _format_summary_string(result)
 
     queue = queue_subsystem.get_queue()
     if not queue:
         _log_error("Unable to access Movie Render Queue.")
-        return _build_result_summary(
-            False, jobs_added, jobs_skipped, missing_shots, missing_data_assets, missing_levels, movie_render_graph_name
-        )
+        return _format_summary_string(result)
 
     seen_shot_names = set()
 
@@ -762,6 +775,9 @@ def run(shot_name_array, is_active_array, is_hero_array, movie_render_graph):
         )
 
     success = jobs_added > 0
+    result["success"] = success
+    result["jobs_added"] = jobs_added
+    result["jobs_skipped"] = jobs_skipped
     _log(
         "Summary: success={0}, jobs_added={1}, jobs_skipped={2}, missing_shots={3}, "
         "missing_data_assets={4}, missing_levels={5}, movie_render_graph='{6}'".format(
@@ -775,12 +791,4 @@ def run(shot_name_array, is_active_array, is_hero_array, movie_render_graph):
         )
     )
 
-    return _build_result_summary(
-        success,
-        jobs_added,
-        jobs_skipped,
-        missing_shots,
-        missing_data_assets,
-        missing_levels,
-        movie_render_graph_name,
-    )
+    return _format_summary_string(result)
