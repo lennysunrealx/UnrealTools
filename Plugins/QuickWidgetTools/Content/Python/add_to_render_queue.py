@@ -439,6 +439,44 @@ def _remove_job_from_queue(queue_subsystem, job):
     _log_warning("Could not remove partially-configured queue job with available removal methods.")
 
 
+
+def _assign_job_name(job, shot_name):
+    job_name = str(shot_name or "").strip()
+    if not job_name:
+        _log_warning("Skipping queue job name assignment because shot name was blank.")
+        return False
+
+    property_candidates = [
+        "job_name",
+        "sequence_name",
+        "name",
+    ]
+
+    for property_name in property_candidates:
+        try:
+            job.set_editor_property(property_name, job_name)
+            try:
+                current_value = job.get_editor_property(property_name)
+            except Exception:
+                current_value = job_name
+
+            _log(f"Assigned queue job name via property '{property_name}': {current_value}")
+            return True
+        except Exception:
+            continue
+
+    setter = getattr(job, "set_job_name", None)
+    if callable(setter):
+        try:
+            setter(job_name)
+            _log(f"Assigned queue job name via set_job_name(): {job_name}")
+            return True
+        except Exception:
+            pass
+
+    _log_warning(f"Could not assign queue job name for shot '{job_name}' with available job properties.")
+    return False
+
 def _assign_job_sequence_and_map(job, sequence_object_path, map_object_path):
     try:
         sequence_soft_path = unreal.SoftObjectPath(sequence_object_path)
@@ -655,6 +693,8 @@ def run(shot_name_array, is_active_array, is_hero_array, movie_render_graph):
             continue
 
         job_is_valid = True
+
+        _assign_job_name(job, shot_name)
 
         if not _assign_job_sequence_and_map(job, level_sequence_object_path, associated_level_object_path):
             job_is_valid = False
