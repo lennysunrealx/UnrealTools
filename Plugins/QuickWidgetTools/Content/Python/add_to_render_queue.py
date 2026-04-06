@@ -234,13 +234,11 @@ def _find_movie_render_graph_asset(movie_render_graph):
                 break
 
         detected_class_names = normalized_class_names.union(class_hierarchy_names)
-        allowed_class_names = {
+        expected_class_names = {
             "MovieGraphConfig",
-            "MovieRenderGraphConfig",
-            "MoviePipelineGraphConfig",
             "MovieGraphConfigBase",
         }
-        looks_like_graph_class = any(class_name in allowed_class_names for class_name in detected_class_names)
+        is_expected_graph_class = any(class_name in expected_class_names for class_name in detected_class_names)
         detected_primary_class = loaded_class_name or registry_class_name or "Unknown"
 
         _log(
@@ -252,9 +250,9 @@ def _find_movie_render_graph_asset(movie_render_graph):
             f"all={sorted(detected_class_names)}"
         )
 
-        if not looks_like_graph_class:
+        if not is_expected_graph_class:
             _log_warning(
-                f"Asset name matched '{movie_render_graph}' but class did not match a Movie Render Graph "
+                f"Asset name matched '{movie_render_graph}' but class did not match expected Movie Render Graph classes "
                 f"(registry='{registry_class_name}', loaded='{loaded_class_name}'). Skipping."
             )
             continue
@@ -416,37 +414,67 @@ def _assign_movie_render_graph_to_job(job, graph_asset):
     except Exception:
         graph_asset_path = str(graph_asset)
 
-    graph_property_candidates = [
-        "graph_preset",
-        "graph_config",
-        "movie_graph_config",
-        "movie_render_graph",
-        "graph",
-    ]
-
-    for prop_name in graph_property_candidates:
-        _log(f"Trying graph assignment via job property '{prop_name}'.")
-        try:
-            job.set_editor_property(prop_name, graph_asset)
+    def _is_graph_assignment_verified(target_obj, target_label):
+        for getter_name in ("get_graph_preset", "get_graph_config"):
+            getter = getattr(target_obj, getter_name, None)
+            if not callable(getter):
+                continue
+            try:
+                assigned_asset = getter()
+            except Exception:
+                continue
+            if assigned_asset == graph_asset:
+                _log(
+                    f"Movie Render Graph assignment verified on {target_label} "
+                    f"via method '{getter_name}()'."
+                )
+                return True
+            try:
+                assigned_path = assigned_asset.get_path_name() if assigned_asset else "None"
+            except Exception:
+                assigned_path = str(assigned_asset)
             _log(
-                f"Successfully assigned Movie Render Graph '{graph_asset_path}' "
-                f"using job property '{prop_name}'."
+                f"Verification probe on {target_label} via '{getter_name}()' "
+                f"returned '{assigned_path}'."
             )
-            return True
-        except Exception:
-            continue
 
-    for setter_name in ("set_graph_preset", "set_graph_config", "set_movie_graph_config"):
+        for prop_name in ("graph_preset", "graph_config", "movie_graph_config", "movie_render_graph", "graph"):
+            try:
+                assigned_asset = target_obj.get_editor_property(prop_name)
+            except Exception:
+                continue
+            if assigned_asset == graph_asset:
+                _log(
+                    f"Movie Render Graph assignment verified on {target_label} "
+                    f"via property '{prop_name}'."
+                )
+                return True
+            try:
+                assigned_path = assigned_asset.get_path_name() if assigned_asset else "None"
+            except Exception:
+                assigned_path = str(assigned_asset)
+            _log(
+                f"Verification probe on {target_label} via property '{prop_name}' "
+                f"returned '{assigned_path}'."
+            )
+
+        return False
+
+    for setter_name in ("set_graph_preset", "set_graph_config"):
         _log(f"Trying graph assignment via job method '{setter_name}()'.")
         setter = getattr(job, setter_name, None)
         if callable(setter):
             try:
                 setter(graph_asset)
-                _log(
-                    f"Successfully assigned Movie Render Graph '{graph_asset_path}' "
-                    f"using job method '{setter_name}()'."
+                if _is_graph_assignment_verified(job, "job"):
+                    _log(
+                        f"Successfully assigned Movie Render Graph '{graph_asset_path}' "
+                        f"using job method '{setter_name}()'."
+                    )
+                    return True
+                _log_warning(
+                    f"Job method '{setter_name}()' executed but assignment could not be verified."
                 )
-                return True
             except Exception:
                 continue
 
@@ -458,31 +486,70 @@ def _assign_movie_render_graph_to_job(job, graph_asset):
             configuration_obj = None
 
         if configuration_obj:
-            for prop_name in ("graph_preset", "graph_config", "movie_graph_config", "movie_render_graph", "graph"):
-                _log(f"Trying graph assignment via configuration property '{prop_name}'.")
-                try:
-                    configuration_obj.set_editor_property(prop_name, graph_asset)
-                    _log(
-                        f"Successfully assigned Movie Render Graph '{graph_asset_path}' "
-                        f"using configuration property '{prop_name}'."
-                    )
-                    return True
-                except Exception:
-                    continue
-
-            for setter_name in ("set_graph_preset", "set_graph_config", "set_movie_graph_config"):
+            for setter_name in ("set_graph_preset", "set_graph_config"):
                 _log(f"Trying graph assignment via configuration method '{setter_name}()'.")
                 setter = getattr(configuration_obj, setter_name, None)
                 if callable(setter):
                     try:
                         setter(graph_asset)
-                        _log(
-                            f"Successfully assigned Movie Render Graph '{graph_asset_path}' "
-                            f"using configuration method '{setter_name}()'."
+                        if _is_graph_assignment_verified(configuration_obj, "configuration"):
+                            _log(
+                                f"Successfully assigned Movie Render Graph '{graph_asset_path}' "
+                                f"using configuration method '{setter_name}()'."
+                            )
+                            return True
+                        _log_warning(
+                            f"Configuration method '{setter_name}()' executed but assignment could not be verified."
                         )
-                        return True
                     except Exception:
                         continue
+
+    _log("Falling back to editor property graph assignment (undocumented path).")
+    graph_property_candidates = [
+        "graph_preset",
+        "graph_config",
+        "movie_graph_config",
+        "movie_render_graph",
+        "graph",
+    ]
+    for prop_name in graph_property_candidates:
+        _log(f"Trying graph assignment via job property '{prop_name}' (fallback).")
+        try:
+            job.set_editor_property(prop_name, graph_asset)
+            if _is_graph_assignment_verified(job, "job"):
+                _log(
+                    f"Successfully assigned Movie Render Graph '{graph_asset_path}' "
+                    f"using job property '{prop_name}' (fallback)."
+                )
+                return True
+            _log_warning(
+                f"Job property '{prop_name}' was set but assignment could not be verified."
+            )
+        except Exception:
+            continue
+
+    if callable(get_configuration_method):
+        try:
+            configuration_obj = get_configuration_method()
+        except Exception:
+            configuration_obj = None
+
+        if configuration_obj:
+            for prop_name in ("graph_preset", "graph_config", "movie_graph_config", "movie_render_graph", "graph"):
+                _log(f"Trying graph assignment via configuration property '{prop_name}' (fallback).")
+                try:
+                    configuration_obj.set_editor_property(prop_name, graph_asset)
+                    if _is_graph_assignment_verified(configuration_obj, "configuration"):
+                        _log(
+                            f"Successfully assigned Movie Render Graph '{graph_asset_path}' "
+                            f"using configuration property '{prop_name}' (fallback)."
+                        )
+                        return True
+                    _log_warning(
+                        f"Configuration property '{prop_name}' was set but assignment could not be verified."
+                    )
+                except Exception:
+                    continue
 
     _log_error("Unable to assign Movie Render Graph to queue job (no supported property/method found).")
     return False
