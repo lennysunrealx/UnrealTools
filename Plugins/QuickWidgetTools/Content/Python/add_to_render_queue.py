@@ -238,14 +238,19 @@ def _find_movie_render_graph_asset(movie_render_graph):
             "MovieGraphConfig",
             "MovieRenderGraphConfig",
             "MoviePipelineGraphConfig",
+            "MovieGraphConfigBase",
         }
         looks_like_graph_class = any(class_name in allowed_class_names for class_name in detected_class_names)
+        detected_primary_class = loaded_class_name or registry_class_name or "Unknown"
 
         _log(
             f"Matched graph asset candidate: path='{object_path}', "
             f"registry_class='{registry_class_name}', loaded_class='{loaded_class_name}'."
         )
-        _log(f"Detected graph asset class names for '{object_path}': {sorted(detected_class_names)}")
+        _log(
+            f"Detected graph asset class for '{object_path}': primary='{detected_primary_class}', "
+            f"all={sorted(detected_class_names)}"
+        )
 
         if not looks_like_graph_class:
             _log_warning(
@@ -266,6 +271,38 @@ def _find_movie_render_graph_asset(movie_render_graph):
 def _switch_job_to_movie_render_graph_mode(job):
     _log("Attempting to switch queue job to Movie Render Graph configuration mode.")
 
+    def _is_mrg_mode_enabled():
+        probes = [
+            ("job property", job, "use_graph_configuration"),
+            ("job property", job, "use_movie_graph"),
+            ("job property", job, "is_graph_configuration"),
+        ]
+
+        get_configuration_method = getattr(job, "get_configuration", None)
+        configuration_obj = None
+        if callable(get_configuration_method):
+            try:
+                configuration_obj = get_configuration_method()
+            except Exception:
+                configuration_obj = None
+
+        if configuration_obj:
+            probes.extend([
+                ("configuration property", configuration_obj, "use_graph_configuration"),
+                ("configuration property", configuration_obj, "use_movie_graph"),
+            ])
+
+        for source, target, prop_name in probes:
+            try:
+                value = target.get_editor_property(prop_name)
+            except Exception:
+                continue
+            if bool(value):
+                _log(f"MRG mode verification passed via {source} '{prop_name}'={value}.")
+                return True
+
+        return False
+
     method_candidates = [
         ("job method", job, "set_use_graph_configuration", [True]),
         ("job method", job, "set_use_movie_graph", [True]),
@@ -279,8 +316,10 @@ def _switch_job_to_movie_render_graph_mode(job):
             continue
         try:
             method(*args)
-            _log(f"Movie Render Graph mode switch succeeded via {source} '{method_name}()'.")
-            return True
+            if _is_mrg_mode_enabled():
+                _log(f"Movie Render Graph mode switch succeeded via {source} '{method_name}()'.")
+                return True
+            _log_warning(f"{source} '{method_name}()' was called but MRG mode could not be verified.")
         except Exception:
             continue
 
@@ -294,8 +333,10 @@ def _switch_job_to_movie_render_graph_mode(job):
         _log(f"Trying {source} '{prop_name}' to enable MRG mode.")
         try:
             job.set_editor_property(prop_name, value)
-            _log(f"Movie Render Graph mode switch succeeded via {source} '{prop_name}'.")
-            return True
+            if _is_mrg_mode_enabled():
+                _log(f"Movie Render Graph mode switch succeeded via {source} '{prop_name}'.")
+                return True
+            _log_warning(f"{source} '{prop_name}' was set but MRG mode could not be verified.")
         except Exception:
             continue
 
@@ -320,8 +361,10 @@ def _switch_job_to_movie_render_graph_mode(job):
                     continue
                 try:
                     method(*args)
-                    _log(f"Movie Render Graph mode switch succeeded via {source} '{method_name}()'.")
-                    return True
+                    if _is_mrg_mode_enabled():
+                        _log(f"Movie Render Graph mode switch succeeded via {source} '{method_name}()'.")
+                        return True
+                    _log_warning(f"{source} '{method_name}()' was called but MRG mode could not be verified.")
                 except Exception:
                     continue
 
@@ -333,8 +376,10 @@ def _switch_job_to_movie_render_graph_mode(job):
                 _log(f"Trying {source} '{prop_name}' to enable MRG mode.")
                 try:
                     configuration_obj.set_editor_property(prop_name, value)
-                    _log(f"Movie Render Graph mode switch succeeded via {source} '{prop_name}'.")
-                    return True
+                    if _is_mrg_mode_enabled():
+                        _log(f"Movie Render Graph mode switch succeeded via {source} '{prop_name}'.")
+                        return True
+                    _log_warning(f"{source} '{prop_name}' was set but MRG mode could not be verified.")
                 except Exception:
                     continue
 
