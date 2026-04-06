@@ -213,29 +213,43 @@ def _find_movie_render_graph_asset(movie_render_graph):
             loaded_class_name = ""
 
         class_name_candidates = {registry_class_name, loaded_class_name}
-        normalized_class_names = {
-            class_name for class_name in class_name_candidates if class_name
-        }
+        normalized_class_names = {class_name for class_name in class_name_candidates if class_name}
+
+        class_hierarchy_names = set()
+        try:
+            class_obj = graph_asset.get_class()
+        except Exception:
+            class_obj = None
+
+        while class_obj:
+            try:
+                class_name = class_obj.get_name()
+            except Exception:
+                class_name = ""
+            if class_name:
+                class_hierarchy_names.add(class_name)
+            try:
+                class_obj = class_obj.get_super_class()
+            except Exception:
+                break
+
+        detected_class_names = normalized_class_names.union(class_hierarchy_names)
         allowed_class_names = {
             "MovieGraphConfig",
             "MovieRenderGraphConfig",
             "MoviePipelineGraphConfig",
         }
-        looks_like_graph_class = any(
-            class_name in allowed_class_names
-            or "MovieGraph" in class_name
-            or "MovieRenderGraph" in class_name
-            for class_name in normalized_class_names
-        )
+        looks_like_graph_class = any(class_name in allowed_class_names for class_name in detected_class_names)
 
         _log(
             f"Matched graph asset candidate: path='{object_path}', "
             f"registry_class='{registry_class_name}', loaded_class='{loaded_class_name}'."
         )
+        _log(f"Detected graph asset class names for '{object_path}': {sorted(detected_class_names)}")
 
         if not looks_like_graph_class:
             _log_warning(
-                f"Asset name matched '{movie_render_graph}' but class did not look like a Movie Render Graph "
+                f"Asset name matched '{movie_render_graph}' but class did not match a Movie Render Graph "
                 f"(registry='{registry_class_name}', loaded='{loaded_class_name}'). Skipping."
             )
             continue
@@ -369,6 +383,40 @@ def _assign_movie_render_graph_to_job(job, graph_asset):
             except Exception:
                 continue
 
+    get_configuration_method = getattr(job, "get_configuration", None)
+    if callable(get_configuration_method):
+        try:
+            configuration_obj = get_configuration_method()
+        except Exception:
+            configuration_obj = None
+
+        if configuration_obj:
+            for prop_name in ("graph_preset", "graph_config", "movie_graph_config", "movie_render_graph", "graph"):
+                _log(f"Trying graph assignment via configuration property '{prop_name}'.")
+                try:
+                    configuration_obj.set_editor_property(prop_name, graph_asset)
+                    _log(
+                        f"Successfully assigned Movie Render Graph '{graph_asset_path}' "
+                        f"using configuration property '{prop_name}'."
+                    )
+                    return True
+                except Exception:
+                    continue
+
+            for setter_name in ("set_graph_preset", "set_graph_config", "set_movie_graph_config"):
+                _log(f"Trying graph assignment via configuration method '{setter_name}()'.")
+                setter = getattr(configuration_obj, setter_name, None)
+                if callable(setter):
+                    try:
+                        setter(graph_asset)
+                        _log(
+                            f"Successfully assigned Movie Render Graph '{graph_asset_path}' "
+                            f"using configuration method '{setter_name}()'."
+                        )
+                        return True
+                    except Exception:
+                        continue
+
     _log_error("Unable to assign Movie Render Graph to queue job (no supported property/method found).")
     return False
 
@@ -390,7 +438,10 @@ def _set_job_sequence_and_map(job, level_sequence_object_path, map_object_path):
             job.set_editor_property(prop_name, sequence_soft_path)
             sequence_assigned = True
             sequence_property_name = prop_name
-            _log(f"Assigned sequence using job property '{prop_name}'.")
+            _log(
+                f"Assigned sequence object path '{level_sequence_object_path}' "
+                f"using job property '{prop_name}'."
+            )
             break
         except Exception:
             continue
@@ -400,7 +451,10 @@ def _set_job_sequence_and_map(job, level_sequence_object_path, map_object_path):
             job.set_editor_property(prop_name, map_soft_path)
             map_assigned = True
             map_property_name = prop_name
-            _log(f"Assigned map using job property '{prop_name}'.")
+            _log(
+                f"Assigned map object path '{map_object_path}' "
+                f"using job property '{prop_name}'."
+            )
             break
         except Exception:
             continue
