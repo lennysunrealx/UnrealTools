@@ -342,6 +342,28 @@ def _switch_job_to_movie_render_graph_mode(job):
     return False
 
 
+def _remove_job_from_queue(queue, job, shot_name, reason):
+    if not queue or not job:
+        return
+
+    _log_warning(f"Removing queue job for '{shot_name}' after skip reason: {reason}")
+
+    for method_name in ("delete_job", "remove_job"):
+        method = getattr(queue, method_name, None)
+        if not callable(method):
+            continue
+        try:
+            method(job)
+            _log(f"Removed queue job for '{shot_name}' using queue method '{method_name}()'.")
+            return
+        except Exception:
+            continue
+
+    _log_warning(
+        f"Unable to remove queue job for '{shot_name}' (no supported queue delete/remove method)."
+    )
+
+
 def _assign_movie_render_graph_to_job(job, graph_asset):
     graph_asset_path = ""
     try:
@@ -489,7 +511,7 @@ def _build_result_summary(success, jobs_added, jobs_skipped, missing_shots, miss
 
 
 def run(shot_name_array, is_active_array, is_hero_array, movie_render_graph):
-    movie_render_graph_name = str(movie_render_graph or "")
+    movie_render_graph_name = str(movie_render_graph or "").strip()
     jobs_added = 0
     jobs_skipped = 0
     missing_shots = []
@@ -606,15 +628,18 @@ def run(shot_name_array, is_active_array, is_hero_array, movie_render_graph):
                 f"Failed to assign sequence/map for shot '{shot_name}'. "
                 f"Sequence='{level_sequence_object_path}', Map='{associated_level_object_path}'"
             )
+            _remove_job_from_queue(queue, job, shot_name, "sequence/map assignment failed")
             jobs_skipped += 1
             continue
 
         if not _switch_job_to_movie_render_graph_mode(job):
             _log_error(f"Skipping shot '{shot_name}' because MRG mode switch failed.")
+            _remove_job_from_queue(queue, job, shot_name, "MRG mode switch failed")
             jobs_skipped += 1
             continue
 
         if not _assign_movie_render_graph_to_job(job, graph_asset):
+            _remove_job_from_queue(queue, job, shot_name, "MRG asset assignment failed")
             jobs_skipped += 1
             continue
 
