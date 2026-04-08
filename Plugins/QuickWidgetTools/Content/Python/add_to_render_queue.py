@@ -25,7 +25,8 @@ ASSOCIATED_LEVEL_PROPERTY_CANDIDATES = [
 OUTPUT_VARIABLE_NAME = "OutputDirectory"
 FILE_NAME_VARIABLE_NAME = "FileNameFormat"
 RENDER_CONTEXT_SEGMENTS = ["lite", "unreal", "_output"]
-DEFAULT_VERSION = "v001"
+VERSION_PATTERN_TEMPLATE = r"^{prefix}_v(\d{{3}})$"
+DEFAULT_VERSION_NUMBER = 1
 
 
 def _log(message):
@@ -611,6 +612,49 @@ def _load_saved_output_root():
     return ""
 
 
+def _find_next_render_version_number(output_parent_directory, stem_prefix):
+    normalized_parent = os.path.normpath(str(output_parent_directory or "").strip())
+    if not normalized_parent:
+        return DEFAULT_VERSION_NUMBER
+
+    pattern = re.compile(VERSION_PATTERN_TEMPLATE.format(prefix=re.escape(stem_prefix)))
+    highest_version = 0
+
+    try:
+        entries = os.listdir(normalized_parent)
+    except FileNotFoundError:
+        _log(f"Output parent folder does not exist yet. Starting version at v{DEFAULT_VERSION_NUMBER:03d}: {normalized_parent}")
+        return DEFAULT_VERSION_NUMBER
+    except Exception as exc:
+        _log_warning(f"Could not inspect output parent folder '{normalized_parent}' for existing versions: {exc}")
+        return DEFAULT_VERSION_NUMBER
+
+    for entry_name in entries:
+        entry_path = os.path.join(normalized_parent, entry_name)
+        if not os.path.isdir(entry_path):
+            continue
+
+        match = pattern.fullmatch(str(entry_name))
+        if not match:
+            continue
+
+        try:
+            version_number = int(match.group(1))
+        except Exception:
+            continue
+
+        if version_number > highest_version:
+            highest_version = version_number
+
+    next_version_number = highest_version + 1 if highest_version > 0 else DEFAULT_VERSION_NUMBER
+    _log(
+        f"Resolved next render version for prefix '{stem_prefix}' under '{normalized_parent}': "
+        f"v{next_version_number:03d}"
+    )
+    return next_version_number
+
+
+
 def _build_render_output_data(output_root, shot_name, movie_render_graph_name):
     if not output_root:
         raise ValueError("Output root folder was empty.")
@@ -623,21 +667,28 @@ def _build_render_output_data(output_root, shot_name, movie_render_graph_name):
     if not graph_name:
         raise ValueError("Movie Render Graph name was empty after sanitization.")
 
-    base_stem = f"{shot_name}_{graph_name}_{DEFAULT_VERSION}"
-    output_directory = os.path.join(
+    stem_prefix = f"{shot_name}_{graph_name}"
+    output_parent_directory = os.path.join(
         output_root,
         sequence_name,
         shot_name,
         *RENDER_CONTEXT_SEGMENTS,
-        base_stem,
     )
+    output_parent_directory = os.path.normpath(output_parent_directory)
+
+    version_number = _find_next_render_version_number(output_parent_directory, stem_prefix)
+    version_text = f"v{version_number:03d}"
+    base_stem = f"{stem_prefix}_{version_text}"
+    output_directory = os.path.join(output_parent_directory, base_stem)
     output_directory = os.path.normpath(output_directory)
 
     return {
         "sequence_name": sequence_name,
         "base_stem": base_stem,
         "output_directory": output_directory,
-        "file_name_format": base_stem,
+        "output_parent_directory": output_parent_directory,
+        "version_text": version_text,
+        "file_name_format": f"{base_stem}.{{frame_number}}",
     }
 
 
