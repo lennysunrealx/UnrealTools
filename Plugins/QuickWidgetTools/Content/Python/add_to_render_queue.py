@@ -24,6 +24,7 @@ ASSOCIATED_LEVEL_PROPERTY_CANDIDATES = [
 ]
 OUTPUT_VARIABLE_NAME = "OutputDirectory"
 FILE_NAME_VARIABLE_NAME = "FileNameFormat"
+MP4_FILE_NAME_VARIABLE_NAME = "MP4FileNameFormat"
 HERO_VARIABLE_NAME = "Hero"
 RENDER_CONTEXT_SEGMENTS = ["lite", "unreal", "_output"]
 VERSION_PATTERN_TEMPLATE = r"^{prefix}_v(\d{{3}})$"
@@ -682,18 +683,18 @@ def _build_render_output_data(output_root, shot_name, movie_render_graph_name):
     version_number = _find_next_render_version_number(output_parent_directory, stem_prefix)
     version_text = f"v{version_number:03d}"
     base_stem = f"{stem_prefix}_{version_text}"
-    output_directory = os.path.join(output_parent_directory, base_stem)
-    output_directory = os.path.normpath(output_directory)
+    version_folder_name = base_stem
 
     return {
         "sequence_name": sequence_name,
         "base_stem": base_stem,
-        "output_directory": output_directory,
+        "output_directory": output_parent_directory,
         "output_parent_directory": output_parent_directory,
         "version_text": version_text,
-        "file_name_format": f"{base_stem}.{{frame_number}}",
+        "version_folder_name": version_folder_name,
+        "file_name_format": f"{version_folder_name}/{base_stem}.{{frame_number}}",
+        "mp4_file_name_format": f"{base_stem}.mp4",
     }
-
 
 def _get_graph_variables(graph_asset):
     getters = [
@@ -817,10 +818,11 @@ def _apply_job_hero_override(job, graph_asset, hero_enabled):
 
 
 
-def _apply_job_output_overrides(job, graph_asset, output_directory, file_name_format):
+def _apply_job_output_overrides(job, graph_asset, output_directory, file_name_format, mp4_file_name_format):
     """
     Returns:
-        "configured" when both overrides were applied successfully
+        "configured" when required overrides were applied successfully
+        "partial" when required overrides were applied and optional MP4 override was unsupported
         "unsupported" when the graph/job does not expose the required override variables
         "failed" when the graph appeared compatible but applying values failed
     """
@@ -884,6 +886,33 @@ def _apply_job_output_overrides(job, graph_asset, output_directory, file_name_fo
             return "failed"
 
     _log(f"Set {FILE_NAME_VARIABLE_NAME} override to: {file_name_format}")
+
+    mp4_variable = _find_graph_variable_by_name(graph_asset, MP4_FILE_NAME_VARIABLE_NAME)
+    if not mp4_variable:
+        _log_warning(
+            f"Graph does not expose optional '{MP4_FILE_NAME_VARIABLE_NAME}'. "
+            "EXR overrides were configured, but MP4 will use graph default naming."
+        )
+        return "partial"
+
+    _set_variable_enable_state(override_container, mp4_variable, True)
+
+    mp4_name_set = False
+    try:
+        override_container.set_value_string(mp4_variable, mp4_file_name_format)
+        mp4_name_set = True
+    except Exception as exc:
+        _log_warning(f"set_value_string() failed for {MP4_FILE_NAME_VARIABLE_NAME}: {exc}")
+
+    if not mp4_name_set:
+        try:
+            override_container.set_value_serialized_string(mp4_variable, mp4_file_name_format)
+            mp4_name_set = True
+        except Exception as exc:
+            _log_error(f"Failed to set {MP4_FILE_NAME_VARIABLE_NAME} override: {exc}")
+            return "failed"
+
+    _log(f"Set {MP4_FILE_NAME_VARIABLE_NAME} override to: {mp4_file_name_format}")
     return "configured"
 
 
@@ -1012,7 +1041,8 @@ def run(shot_name_array, is_active_array, is_hero_array, movie_render_graph):
             render_output_data = _build_render_output_data(output_root, shot_name, movie_render_graph)
             _log(
                 f"Render output for '{shot_name}': directory='{render_output_data['output_directory']}', "
-                f"file_name_format='{render_output_data['file_name_format']}'"
+                f"file_name_format='{render_output_data['file_name_format']}', "
+                f"mp4_file_name_format='{render_output_data['mp4_file_name_format']}'"
             )
         except Exception as exc:
             result["jobs_skipped"] += 1
@@ -1046,6 +1076,7 @@ def run(shot_name_array, is_active_array, is_hero_array, movie_render_graph):
                 graph_asset,
                 render_output_data["output_directory"],
                 render_output_data["file_name_format"],
+                render_output_data["mp4_file_name_format"],
             )
             if output_override_result == "failed":
                 result["output_config_failures"].append(shot_name)
@@ -1066,7 +1097,7 @@ def run(shot_name_array, is_active_array, is_hero_array, movie_render_graph):
             continue
 
         result["jobs_added"] += 1
-        if output_override_result == "configured":
+        if output_override_result in {"configured", "partial"}:
             result["jobs_output_configured"] += 1
 
         if hero_override_result == "configured":
