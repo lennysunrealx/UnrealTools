@@ -693,7 +693,7 @@ def _build_render_output_data(output_root, shot_name, movie_render_graph_name):
         "version_text": version_text,
         "version_folder_name": version_folder_name,
         "file_name_format": f"{version_folder_name}/{base_stem}.{{frame_number}}",
-        "mp4_file_name_format": f"{base_stem}.mp4",
+        "mp4_file_name_format": base_stem,
     }
 
 def _get_graph_variables(graph_asset):
