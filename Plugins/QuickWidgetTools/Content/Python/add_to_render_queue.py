@@ -24,6 +24,7 @@ ASSOCIATED_LEVEL_PROPERTY_CANDIDATES = [
 ]
 OUTPUT_VARIABLE_NAME = "OutputDirectory"
 FILE_NAME_VARIABLE_NAME = "FileNameFormat"
+HERO_VARIABLE_NAME = "Hero"
 RENDER_CONTEXT_SEGMENTS = ["lite", "unreal", "_output"]
 VERSION_PATTERN_TEMPLATE = r"^{prefix}_v(\d{{3}})$"
 DEFAULT_VERSION_NUMBER = 1
@@ -167,6 +168,7 @@ def _new_result(movie_render_graph_name):
         "jobs_added": 0,
         "jobs_skipped": 0,
         "jobs_output_configured": 0,
+        "jobs_hero_configured": 0,
         "missing_shots": [],
         "missing_data_assets": [],
         "missing_levels": [],
@@ -195,6 +197,7 @@ def _format_summary_string(result):
         f"jobs_added={int(result.get('jobs_added', 0))};"
         f"jobs_skipped={int(result.get('jobs_skipped', 0))};"
         f"jobs_output_configured={int(result.get('jobs_output_configured', 0))};"
+        f"jobs_hero_configured={int(result.get('jobs_hero_configured', 0))};"
         f"missing_shots={_join(result.get('missing_shots', []))};"
         f"missing_data_assets={_join(result.get('missing_data_assets', []))};"
         f"missing_levels={_join(result.get('missing_levels', []))};"
@@ -760,6 +763,60 @@ def _set_variable_enable_state(container, variable, enabled=True):
     return False
 
 
+
+def _apply_job_hero_override(job, graph_asset, hero_enabled):
+    """
+    Returns:
+        "configured" when the Hero override was applied successfully
+        "unsupported" when the graph/job does not expose the Hero override variable
+        "failed" when the graph appeared compatible but applying the value failed
+    """
+    get_overrides = getattr(job, "get_or_create_variable_overrides", None)
+    if not callable(get_overrides):
+        _log_warning("Queue job does not expose get_or_create_variable_overrides(); leaving Hero graph default unchanged.")
+        return "unsupported"
+
+    try:
+        override_container = get_overrides(graph_asset)
+    except Exception as exc:
+        _log_warning(f"Failed to get graph variable override container for Hero; leaving graph default unchanged: {exc}")
+        return "unsupported"
+
+    if not override_container:
+        _log_warning("Graph variable override container was empty for Hero; leaving graph default unchanged.")
+        return "unsupported"
+
+    updater = getattr(override_container, "update_graph_variable_overrides", None)
+    if callable(updater):
+        try:
+            updater()
+        except Exception as exc:
+            _log_warning(f"update_graph_variable_overrides() failed for Hero: {exc}")
+
+    hero_variable = _find_graph_variable_by_name(graph_asset, HERO_VARIABLE_NAME)
+    if not hero_variable:
+        _log_warning(
+            f"Graph does not expose '{HERO_VARIABLE_NAME}'. Job will stay queued and use graph default Hero behavior."
+        )
+        return "unsupported"
+
+    _set_variable_enable_state(override_container, hero_variable, True)
+
+    try:
+        success = override_container.set_value_bool(hero_variable, bool(hero_enabled))
+    except Exception as exc:
+        _log_error(f"Failed to set {HERO_VARIABLE_NAME} override: {exc}")
+        return "failed"
+
+    if not success:
+        _log_error(f"set_value_bool() reported failure for {HERO_VARIABLE_NAME}.")
+        return "failed"
+
+    _log(f"Set {HERO_VARIABLE_NAME} override to: {bool(hero_enabled)}")
+    return "configured"
+
+
+
 def _apply_job_output_overrides(job, graph_asset, output_directory, file_name_format):
     """
     Returns:
@@ -831,8 +888,6 @@ def _apply_job_output_overrides(job, graph_asset, output_directory, file_name_fo
 
 
 def run(shot_name_array, is_active_array, is_hero_array, movie_render_graph):
-    del is_hero_array
-
     result = _new_result(movie_render_graph)
 
     try:
@@ -845,6 +900,11 @@ def run(shot_name_array, is_active_array, is_hero_array, movie_render_graph):
     except Exception:
         active_flags = []
 
+    try:
+        hero_flags = list(is_hero_array or [])
+    except Exception:
+        hero_flags = []
+
     if not shot_names:
         return _format_summary_string(
             _finalize_result(result, success=False, message="No shot names were provided.")
@@ -852,6 +912,8 @@ def run(shot_name_array, is_active_array, is_hero_array, movie_render_graph):
 
     if len(active_flags) < len(shot_names):
         active_flags.extend([0] * (len(shot_names) - len(active_flags)))
+    if len(hero_flags) < len(shot_names):
+        hero_flags.extend([0] * (len(shot_names) - len(hero_flags)))
 
     queue_subsystem = unreal.get_editor_subsystem(unreal.MoviePipelineQueueSubsystem)
     if not queue_subsystem:
@@ -896,6 +958,7 @@ def run(shot_name_array, is_active_array, is_hero_array, movie_render_graph):
     for index, raw_shot_name in enumerate(shot_names):
         shot_name = _sanitize_shot_name(raw_shot_name)
         is_active = _coerce_to_bool_flag(active_flags[index] if index < len(active_flags) else 0)
+        is_hero = _coerce_to_bool_flag(hero_flags[index] if index < len(hero_flags) else 0)
 
         if not shot_name:
             result["jobs_skipped"] += 1
@@ -976,6 +1039,7 @@ def run(shot_name_array, is_active_array, is_hero_array, movie_render_graph):
             job_is_valid = False
 
         output_override_result = "unsupported"
+        hero_override_result = "unsupported"
         if job_is_valid:
             output_override_result = _apply_job_output_overrides(
                 job,
@@ -987,6 +1051,15 @@ def run(shot_name_array, is_active_array, is_hero_array, movie_render_graph):
                 result["output_config_failures"].append(shot_name)
                 job_is_valid = False
 
+        if job_is_valid:
+            hero_override_result = _apply_job_hero_override(
+                job,
+                graph_asset,
+                is_hero,
+            )
+            if hero_override_result == "failed":
+                job_is_valid = False
+
         if not job_is_valid:
             result["jobs_skipped"] += 1
             _remove_job_from_queue(queue_subsystem, job)
@@ -995,11 +1068,14 @@ def run(shot_name_array, is_active_array, is_hero_array, movie_render_graph):
         result["jobs_added"] += 1
         if output_override_result == "configured":
             result["jobs_output_configured"] += 1
-            _log(f"Successfully added shot '{shot_name}' to Movie Render Queue with output overrides.")
-        else:
-            _log(
-                f"Successfully added shot '{shot_name}' to Movie Render Queue using graph default output settings."
-            )
+
+        if hero_override_result == "configured":
+            result["jobs_hero_configured"] += 1
+
+        _log(
+            f"Successfully added shot '{shot_name}' to Movie Render Queue. "
+            f"output_override_result={output_override_result}; hero_override_result={hero_override_result}; hero={is_hero}"
+        )
 
     success = (
         result["jobs_added"] > 0
@@ -1011,10 +1087,13 @@ def run(shot_name_array, is_active_array, is_hero_array, movie_render_graph):
         message = "No jobs were added to the Movie Render Queue."
     else:
         default_output_jobs = result["jobs_added"] - result["jobs_output_configured"]
+        default_hero_jobs = result["jobs_added"] - result["jobs_hero_configured"]
         message = (
             f"Added {result['jobs_added']} job(s) to the Movie Render Queue. "
             f"Configured output overrides on {result['jobs_output_configured']} job(s). "
-            f"{default_output_jobs} job(s) are using graph default output settings."
+            f"Configured Hero overrides on {result['jobs_hero_configured']} job(s). "
+            f"{default_output_jobs} job(s) are using graph default output settings. "
+            f"{default_hero_jobs} job(s) are using graph default Hero behavior."
         )
 
     return _format_summary_string(_finalize_result(result, success=success, message=message))
