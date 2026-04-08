@@ -6,7 +6,6 @@ import unreal
 
 @unreal.uclass()
 class MRGHero(unreal.MovieGraphScriptBase):
-
     IMAGE_EXTENSIONS = {
         ".exr",
         ".png",
@@ -30,12 +29,10 @@ class MRGHero(unreal.MovieGraphScriptBase):
 
         all_file_paths = self._collect_output_file_paths(in_output_data)
         frame_files = self._filter_image_files(all_file_paths)
-
         if not frame_files:
             unreal.log_warning(f"{log_prefix} No rendered image sequence files found.")
             return
 
-        # Sort for stability
         frame_files = sorted(frame_files)
 
         render_output_folder = os.path.dirname(frame_files[0])
@@ -46,7 +43,6 @@ class MRGHero(unreal.MovieGraphScriptBase):
         unreal.log(f"{log_prefix} Parent Folder: {parent_folder}")
         unreal.log(f"{log_prefix} Hero Folder: {hero_folder}")
 
-        # Delete old _hero folder if it exists
         if os.path.isdir(hero_folder):
             try:
                 shutil.rmtree(hero_folder)
@@ -55,7 +51,6 @@ class MRGHero(unreal.MovieGraphScriptBase):
                 unreal.log_error(f"{log_prefix} Failed to delete existing hero folder: {exc}")
                 return
 
-        # Recreate _hero folder
         try:
             os.makedirs(hero_folder, exist_ok=True)
             unreal.log(f"{log_prefix} Created new hero folder.")
@@ -64,16 +59,13 @@ class MRGHero(unreal.MovieGraphScriptBase):
             return
 
         copied_count = 0
-
         for source_path in frame_files:
             try:
                 file_name = os.path.basename(source_path)
                 new_file_name = self._make_hero_filename(file_name)
                 dest_path = os.path.join(hero_folder, new_file_name)
-
                 shutil.copy2(source_path, dest_path)
                 copied_count += 1
-
             except Exception as exc:
                 unreal.log_warning(f"{log_prefix} Failed to copy file: {source_path} | {exc}")
 
@@ -96,10 +88,8 @@ class MRGHero(unreal.MovieGraphScriptBase):
 
         try:
             graph_data = in_output_data.graph_data
-
             for render_output_data in graph_data:
                 self._collect_from_render_output_data(render_output_data, collected)
-
         except Exception as exc:
             unreal.log_warning(f"[QuickWidgetToolsMRG_Hero] Failed while collecting from graph_data: {exc}")
 
@@ -112,12 +102,9 @@ class MRGHero(unreal.MovieGraphScriptBase):
 
             render_layer_data = render_output_data.render_layer_data
 
-            # Epic's Python example iterates shot.render_layer_data and then indexes back into it
-            # using the identifier as the key.
             for identifier_data in render_layer_data:
                 output_info = render_layer_data[identifier_data]
                 self._collect_from_output_info(output_info, collected)
-
         except Exception as exc:
             unreal.log_warning(f"[QuickWidgetToolsMRG_Hero] Failed while collecting from render_output_data: {exc}")
 
@@ -151,16 +138,16 @@ class MRGHero(unreal.MovieGraphScriptBase):
 
     def _make_hero_filename(self, file_name):
         """
-        Example:
-        ABC_000_0050_beauty_v017.1001.exr
-        -> ABC_000_0050_beauty.1001.exr
+        Examples:
+        - ABC_000_0050_beautyHDlinear_v001.1001.exr -> ABC_000_0050.1001.exr
+        - ABC_000_0050_beauty_v017.1001.exr -> ABC_000_0050.1001.exr
 
-        Removes the final underscore-group before the frame number.
+        Goal:
+        keep only the first three underscore-delimited shot tokens:
+        [SEQ]_[SHOT_SHORT]_[SHOT_LONG].[frame].[ext]
         """
         stem, ext = os.path.splitext(file_name)
 
-        # Split off the frame number from the end:
-        # "ABC_000_0050_beauty_v017.1001" -> base="ABC_000_0050_beauty_v017", frame="1001"
         match = re.match(r"^(.*)\.(\d+)$", stem)
         if not match:
             return file_name
@@ -168,10 +155,12 @@ class MRGHero(unreal.MovieGraphScriptBase):
         base_name = match.group(1)
         frame_number = match.group(2)
 
-        # Remove the final underscore chunk, eg "_v017"
-        trimmed_base = re.sub(r"_[^_]+$", "", base_name)
+        tokens = base_name.split("_")
+        if len(tokens) < 3:
+            return file_name
 
-        return f"{trimmed_base}.{frame_number}{ext}"
+        shot_name = "_".join(tokens[:3])
+        return f"{shot_name}.{frame_number}{ext}"
 
     def _dedupe_paths(self, paths):
         deduped = []
