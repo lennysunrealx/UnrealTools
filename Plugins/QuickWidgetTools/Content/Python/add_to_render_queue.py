@@ -761,20 +761,26 @@ def _set_variable_enable_state(container, variable, enabled=True):
 
 
 def _apply_job_output_overrides(job, graph_asset, output_directory, file_name_format):
+    """
+    Returns:
+        "configured" when both overrides were applied successfully
+        "unsupported" when the graph/job does not expose the required override variables
+        "failed" when the graph appeared compatible but applying values failed
+    """
     get_overrides = getattr(job, "get_or_create_variable_overrides", None)
     if not callable(get_overrides):
-        _log_error("Queue job does not expose get_or_create_variable_overrides().")
-        return False
+        _log_warning("Queue job does not expose get_or_create_variable_overrides(); leaving graph defaults unchanged.")
+        return "unsupported"
 
     try:
         override_container = get_overrides(graph_asset)
     except Exception as exc:
-        _log_error(f"Failed to get graph variable override container: {exc}")
-        return False
+        _log_warning(f"Failed to get graph variable override container; leaving graph defaults unchanged: {exc}")
+        return "unsupported"
 
     if not override_container:
-        _log_error("Graph variable override container was empty.")
-        return False
+        _log_warning("Graph variable override container was empty; leaving graph defaults unchanged.")
+        return "unsupported"
 
     updater = getattr(override_container, "update_graph_variable_overrides", None)
     if callable(updater):
@@ -787,10 +793,11 @@ def _apply_job_output_overrides(job, graph_asset, output_directory, file_name_fo
     file_name_variable = _find_graph_variable_by_name(graph_asset, FILE_NAME_VARIABLE_NAME)
 
     if not output_variable or not file_name_variable:
-        _log_error(
-            f"Required graph variables were missing. Needed '{OUTPUT_VARIABLE_NAME}' and '{FILE_NAME_VARIABLE_NAME}'."
+        _log_warning(
+            f"Graph does not expose both '{OUTPUT_VARIABLE_NAME}' and '{FILE_NAME_VARIABLE_NAME}'. "
+            f"Job will stay queued and use graph defaults."
         )
-        return False
+        return "unsupported"
 
     _set_variable_enable_state(override_container, output_variable, True)
     _set_variable_enable_state(override_container, file_name_variable, True)
@@ -802,7 +809,7 @@ def _apply_job_output_overrides(job, graph_asset, output_directory, file_name_fo
         _log(f"Set {OUTPUT_VARIABLE_NAME} override to: {output_directory}")
     except Exception as exc:
         _log_error(f"Failed to set {OUTPUT_VARIABLE_NAME} override: {exc}")
-        return False
+        return "failed"
 
     file_name_set = False
     try:
@@ -817,10 +824,10 @@ def _apply_job_output_overrides(job, graph_asset, output_directory, file_name_fo
             file_name_set = True
         except Exception as exc:
             _log_error(f"Failed to set {FILE_NAME_VARIABLE_NAME} override: {exc}")
-            return False
+            return "failed"
 
     _log(f"Set {FILE_NAME_VARIABLE_NAME} override to: {file_name_format}")
-    return True
+    return "configured"
 
 
 def run(shot_name_array, is_active_array, is_hero_array, movie_render_graph):
@@ -968,14 +975,17 @@ def run(shot_name_array, is_active_array, is_hero_array, movie_render_graph):
         if job_is_valid and not _assign_movie_render_graph_to_job(job, graph_asset):
             job_is_valid = False
 
-        if job_is_valid and not _apply_job_output_overrides(
-            job,
-            graph_asset,
-            render_output_data["output_directory"],
-            render_output_data["file_name_format"],
-        ):
-            result["output_config_failures"].append(shot_name)
-            job_is_valid = False
+        output_override_result = "unsupported"
+        if job_is_valid:
+            output_override_result = _apply_job_output_overrides(
+                job,
+                graph_asset,
+                render_output_data["output_directory"],
+                render_output_data["file_name_format"],
+            )
+            if output_override_result == "failed":
+                result["output_config_failures"].append(shot_name)
+                job_is_valid = False
 
         if not job_is_valid:
             result["jobs_skipped"] += 1
@@ -983,8 +993,13 @@ def run(shot_name_array, is_active_array, is_hero_array, movie_render_graph):
             continue
 
         result["jobs_added"] += 1
-        result["jobs_output_configured"] += 1
-        _log(f"Successfully added shot '{shot_name}' to Movie Render Queue.")
+        if output_override_result == "configured":
+            result["jobs_output_configured"] += 1
+            _log(f"Successfully added shot '{shot_name}' to Movie Render Queue with output overrides.")
+        else:
+            _log(
+                f"Successfully added shot '{shot_name}' to Movie Render Queue using graph default output settings."
+            )
 
     success = (
         result["jobs_added"] > 0
@@ -995,9 +1010,11 @@ def run(shot_name_array, is_active_array, is_hero_array, movie_render_graph):
     if result["jobs_added"] == 0:
         message = "No jobs were added to the Movie Render Queue."
     else:
+        default_output_jobs = result["jobs_added"] - result["jobs_output_configured"]
         message = (
             f"Added {result['jobs_added']} job(s) to the Movie Render Queue. "
-            f"Configured output overrides on {result['jobs_output_configured']} job(s)."
+            f"Configured output overrides on {result['jobs_output_configured']} job(s). "
+            f"{default_output_jobs} job(s) are using graph default output settings."
         )
 
     return _format_summary_string(_finalize_result(result, success=success, message=message))
