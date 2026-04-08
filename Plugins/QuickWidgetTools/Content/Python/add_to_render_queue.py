@@ -1,5 +1,7 @@
-
+import importlib
+import os
 import re
+
 import unreal
 
 
@@ -20,6 +22,10 @@ ASSOCIATED_LEVEL_PROPERTY_CANDIDATES = [
     "LevelAssociation",
     "AssociatedLevelStored",
 ]
+OUTPUT_VARIABLE_NAME = "OutputDirectory"
+FILE_NAME_VARIABLE_NAME = "FileNameFormat"
+RENDER_CONTEXT_SEGMENTS = ["lite", "unreal", "_output"]
+DEFAULT_VERSION = "v001"
 
 
 def _log(message):
@@ -99,6 +105,12 @@ def _sanitize_shot_name(value):
     return cleaned.upper()
 
 
+def _sanitize_graph_name(value):
+    if value is None:
+        return ""
+    return re.sub(r"[^A-Za-z0-9_]", "", str(value)).strip()
+
+
 def _is_shot_name_valid(shot_name):
     return bool(SHOT_NAME_PATTERN.fullmatch(shot_name))
 
@@ -153,11 +165,13 @@ def _new_result(movie_render_graph_name):
         "success": True,
         "jobs_added": 0,
         "jobs_skipped": 0,
+        "jobs_output_configured": 0,
         "missing_shots": [],
         "missing_data_assets": [],
         "missing_levels": [],
         "invalid_shots": [],
         "duplicate_active_shots": [],
+        "output_config_failures": [],
         "movie_render_graph": str(movie_render_graph_name or ""),
         "message": "",
     }
@@ -179,11 +193,13 @@ def _format_summary_string(result):
         f"success={1 if result.get('success') else 0};"
         f"jobs_added={int(result.get('jobs_added', 0))};"
         f"jobs_skipped={int(result.get('jobs_skipped', 0))};"
+        f"jobs_output_configured={int(result.get('jobs_output_configured', 0))};"
         f"missing_shots={_join(result.get('missing_shots', []))};"
         f"missing_data_assets={_join(result.get('missing_data_assets', []))};"
         f"missing_levels={_join(result.get('missing_levels', []))};"
         f"invalid_shots={_join(result.get('invalid_shots', []))};"
         f"duplicate_active_shots={_join(result.get('duplicate_active_shots', []))};"
+        f"output_config_failures={_join(result.get('output_config_failures', []))};"
         f"movie_render_graph={result.get('movie_render_graph', '')};"
         f"message={result.get('message', '')}"
     )
@@ -439,7 +455,6 @@ def _remove_job_from_queue(queue_subsystem, job):
     _log_warning("Could not remove partially-configured queue job with available removal methods.")
 
 
-
 def _assign_job_name(job, shot_name):
     job_name = str(shot_name or "").strip()
     if not job_name:
@@ -476,6 +491,7 @@ def _assign_job_name(job, shot_name):
 
     _log_warning(f"Could not assign queue job name for shot '{job_name}' with available job properties.")
     return False
+
 
 def _assign_job_sequence_and_map(job, sequence_object_path, map_object_path):
     try:
@@ -542,16 +558,16 @@ def _verify_graph_assignment(job, graph_asset):
 
 def _assign_movie_render_graph_to_job(job, graph_asset):
     assignment_attempts = [
-        ("set_graph_preset", graph_asset),
-        ("set_graph_config", graph_asset),
+        ("set_graph_preset", (graph_asset, True)),
+        ("set_graph_config", (graph_asset,)),
     ]
 
-    for method_name, method_arg in assignment_attempts:
+    for method_name, method_args in assignment_attempts:
         method = getattr(job, method_name, None)
         if not callable(method):
             continue
         try:
-            method(method_arg)
+            method(*method_args)
             _log(f"Assigned Movie Render Graph via documented job method {method_name}().")
             if _verify_graph_assignment(job, graph_asset):
                 return True
@@ -577,6 +593,183 @@ def _assign_movie_render_graph_to_job(job, graph_asset):
 
     _log_error("Failed to assign Movie Render Graph to queue job.")
     return False
+
+
+def _load_saved_output_root():
+    try:
+        import get_outputFolder
+
+        importlib.reload(get_outputFolder)
+        output_root = str(get_outputFolder.run() or "").strip()
+        if output_root:
+            normalized = os.path.normpath(output_root)
+            _log(f"Loaded output root from get_outputFolder: {normalized}")
+            return normalized
+    except Exception as exc:
+        _log_error(f"Failed to load output root from get_outputFolder: {exc}")
+
+    return ""
+
+
+def _build_render_output_data(output_root, shot_name, movie_render_graph_name):
+    if not output_root:
+        raise ValueError("Output root folder was empty.")
+
+    sequence_name = _derive_sequence_prefix(shot_name)
+    if not sequence_name:
+        raise ValueError(f"Could not derive sequence name from shot '{shot_name}'.")
+
+    graph_name = _sanitize_graph_name(movie_render_graph_name)
+    if not graph_name:
+        raise ValueError("Movie Render Graph name was empty after sanitization.")
+
+    base_stem = f"{shot_name}_{graph_name}_{DEFAULT_VERSION}"
+    output_directory = os.path.join(
+        output_root,
+        sequence_name,
+        shot_name,
+        *RENDER_CONTEXT_SEGMENTS,
+        base_stem,
+    )
+    output_directory = os.path.normpath(output_directory)
+
+    return {
+        "sequence_name": sequence_name,
+        "base_stem": base_stem,
+        "output_directory": output_directory,
+        "file_name_format": base_stem,
+    }
+
+
+def _get_graph_variables(graph_asset):
+    getters = [
+        "get_variables",
+        "get_all_variables",
+    ]
+
+    for getter_name in getters:
+        getter = getattr(graph_asset, getter_name, None)
+        if not callable(getter):
+            continue
+        try:
+            variables = list(getter() or [])
+            if variables:
+                _log(f"Discovered {len(variables)} graph variables via {getter_name}().")
+            else:
+                _log_warning(f"Graph variable query {getter_name}() returned no variables.")
+            return variables
+        except Exception as exc:
+            _log_warning(f"Graph variable query {getter_name}() failed: {exc}")
+
+    return []
+
+
+def _get_graph_variable_name(variable):
+    for getter_name in ("get_member_name", "get_variable_name", "get_name"):
+        getter = getattr(variable, getter_name, None)
+        if not callable(getter):
+            continue
+        try:
+            value = getter()
+        except Exception:
+            continue
+        if value is None:
+            continue
+        text = str(value)
+        if text:
+            return text
+    return ""
+
+
+def _find_graph_variable_by_name(graph_asset, variable_name):
+    requested = str(variable_name or "").strip()
+    if not requested:
+        return None
+
+    for variable in _get_graph_variables(graph_asset):
+        discovered_name = _get_graph_variable_name(variable)
+        if discovered_name == requested:
+            _log(f"Resolved graph variable '{requested}'.")
+            return variable
+
+    _log_warning(f"Could not find graph variable named '{requested}'.")
+    return None
+
+
+def _set_variable_enable_state(container, variable, enabled=True):
+    for method_name in ("set_variable_assignment_enable_state", "set_value_enable_state"):
+        method = getattr(container, method_name, None)
+        if not callable(method):
+            continue
+        try:
+            method(variable, enabled)
+            return True
+        except Exception:
+            continue
+    return False
+
+
+def _apply_job_output_overrides(job, graph_asset, output_directory, file_name_format):
+    get_overrides = getattr(job, "get_or_create_variable_overrides", None)
+    if not callable(get_overrides):
+        _log_error("Queue job does not expose get_or_create_variable_overrides().")
+        return False
+
+    try:
+        override_container = get_overrides(graph_asset)
+    except Exception as exc:
+        _log_error(f"Failed to get graph variable override container: {exc}")
+        return False
+
+    if not override_container:
+        _log_error("Graph variable override container was empty.")
+        return False
+
+    updater = getattr(override_container, "update_graph_variable_overrides", None)
+    if callable(updater):
+        try:
+            updater()
+        except Exception as exc:
+            _log_warning(f"update_graph_variable_overrides() failed: {exc}")
+
+    output_variable = _find_graph_variable_by_name(graph_asset, OUTPUT_VARIABLE_NAME)
+    file_name_variable = _find_graph_variable_by_name(graph_asset, FILE_NAME_VARIABLE_NAME)
+
+    if not output_variable or not file_name_variable:
+        _log_error(
+            f"Required graph variables were missing. Needed '{OUTPUT_VARIABLE_NAME}' and '{FILE_NAME_VARIABLE_NAME}'."
+        )
+        return False
+
+    _set_variable_enable_state(override_container, output_variable, True)
+    _set_variable_enable_state(override_container, file_name_variable, True)
+
+    output_serialized = unreal.DirectoryPath(output_directory).export_text()
+
+    try:
+        override_container.set_value_serialized_string(output_variable, output_serialized)
+        _log(f"Set {OUTPUT_VARIABLE_NAME} override to: {output_directory}")
+    except Exception as exc:
+        _log_error(f"Failed to set {OUTPUT_VARIABLE_NAME} override: {exc}")
+        return False
+
+    file_name_set = False
+    try:
+        override_container.set_value_string(file_name_variable, file_name_format)
+        file_name_set = True
+    except Exception as exc:
+        _log_warning(f"set_value_string() failed for {FILE_NAME_VARIABLE_NAME}: {exc}")
+
+    if not file_name_set:
+        try:
+            override_container.set_value_serialized_string(file_name_variable, file_name_format)
+            file_name_set = True
+        except Exception as exc:
+            _log_error(f"Failed to set {FILE_NAME_VARIABLE_NAME} override: {exc}")
+            return False
+
+    _log(f"Set {FILE_NAME_VARIABLE_NAME} override to: {file_name_format}")
+    return True
 
 
 def run(shot_name_array, is_active_array, is_hero_array, movie_render_graph):
@@ -627,6 +820,16 @@ def run(shot_name_array, is_active_array, is_hero_array, movie_render_graph):
                 result,
                 success=False,
                 message=f"Movie Render Graph '{movie_render_graph}' could not be resolved.",
+            )
+        )
+
+    output_root = _load_saved_output_root()
+    if not output_root:
+        return _format_summary_string(
+            _finalize_result(
+                result,
+                success=False,
+                message="Output root folder was empty. Save an output folder before submitting jobs.",
             )
         )
 
@@ -685,6 +888,18 @@ def run(shot_name_array, is_active_array, is_hero_array, movie_render_graph):
             continue
 
         try:
+            render_output_data = _build_render_output_data(output_root, shot_name, movie_render_graph)
+            _log(
+                f"Render output for '{shot_name}': directory='{render_output_data['output_directory']}', "
+                f"file_name_format='{render_output_data['file_name_format']}'"
+            )
+        except Exception as exc:
+            result["jobs_skipped"] += 1
+            result["output_config_failures"].append(shot_name)
+            _log_error(f"Failed to build render output data for shot '{shot_name}': {exc}")
+            continue
+
+        try:
             job = queue.allocate_new_job(executor_job_class)
             _log(f"Allocated queue job for shot '{shot_name}'.")
         except Exception as exc:
@@ -702,18 +917,36 @@ def run(shot_name_array, is_active_array, is_hero_array, movie_render_graph):
         if job_is_valid and not _assign_movie_render_graph_to_job(job, graph_asset):
             job_is_valid = False
 
+        if job_is_valid and not _apply_job_output_overrides(
+            job,
+            graph_asset,
+            render_output_data["output_directory"],
+            render_output_data["file_name_format"],
+        ):
+            result["output_config_failures"].append(shot_name)
+            job_is_valid = False
+
         if not job_is_valid:
             result["jobs_skipped"] += 1
             _remove_job_from_queue(queue_subsystem, job)
             continue
 
         result["jobs_added"] += 1
+        result["jobs_output_configured"] += 1
         _log(f"Successfully added shot '{shot_name}' to Movie Render Queue.")
 
-    success = result["jobs_added"] > 0 and not result["missing_shots"] and not result["missing_levels"]
+    success = (
+        result["jobs_added"] > 0
+        and not result["missing_shots"]
+        and not result["missing_levels"]
+        and not result["output_config_failures"]
+    )
     if result["jobs_added"] == 0:
         message = "No jobs were added to the Movie Render Queue."
     else:
-        message = f"Added {result['jobs_added']} job(s) to the Movie Render Queue."
+        message = (
+            f"Added {result['jobs_added']} job(s) to the Movie Render Queue. "
+            f"Configured output overrides on {result['jobs_output_configured']} job(s)."
+        )
 
     return _format_summary_string(_finalize_result(result, success=success, message=message))
