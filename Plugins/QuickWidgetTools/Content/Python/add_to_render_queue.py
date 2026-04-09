@@ -6,7 +6,7 @@ import unreal
 
 
 LOG_PREFIX = "[AddToRenderQueue]"
-MRG_SETTINGS_FOLDER = "/QuickWidgetTools/Misc/MRGSettings"
+DEFAULT_RENDER_GRAPH_FOLDER_PATH = "/QuickWidgetTools/Misc/MRGSettings"
 SHOT_NAME_PATTERN = re.compile(r"^([A-Za-z0-9]+)_(\d{3})_(\d{4,})$")
 EXPECTED_GRAPH_CLASS_NAMES = {"MovieGraphConfig", "MovieGraphConfigBase"}
 EXPECTED_SHOT_DATA_CLASS_HINTS = {
@@ -367,21 +367,85 @@ def _extract_associated_level_object_path(shot_data_asset):
     return ""
 
 
-def _find_movie_render_graph_asset(movie_render_graph_name):
+def _sanitize_render_graph_folder_path(folder_path):
+    path = _clean_package_path(folder_path)
+    if not path:
+        return ""
+    if not path.startswith("/"):
+        path = "/" + path
+    return _clean_package_path(path)
+
+
+def _get_render_graph_search_paths(render_graph_folder_path, render_graph_secondary_folder_path):
+    raw_paths = [
+        render_graph_folder_path,
+        render_graph_secondary_folder_path,
+        DEFAULT_RENDER_GRAPH_FOLDER_PATH,
+    ]
+
+    search_paths = []
+    seen = set()
+
+    for raw_path in raw_paths:
+        sanitized_path = _sanitize_render_graph_folder_path(raw_path)
+        if not sanitized_path:
+            continue
+        if sanitized_path in seen:
+            continue
+        seen.add(sanitized_path)
+        search_paths.append(sanitized_path)
+
+    return search_paths
+
+
+def _find_movie_render_graph_asset(
+    movie_render_graph_name,
+    render_graph_folder_path=None,
+    render_graph_secondary_folder_path=None,
+):
     requested_name = str(movie_render_graph_name or "").strip()
     if not requested_name:
         _log_error("Movie Render Graph name was empty.")
         return None
 
     editor_asset_lib = unreal.EditorAssetLibrary
-    if not editor_asset_lib.does_directory_exist(MRG_SETTINGS_FOLDER):
-        _log_error(f"Movie Render Graph folder not found: {MRG_SETTINGS_FOLDER}")
+    asset_registry = unreal.AssetRegistryHelpers.get_asset_registry()
+    search_paths = _get_render_graph_search_paths(
+        render_graph_folder_path,
+        render_graph_secondary_folder_path,
+    )
+
+    if not search_paths:
+        _log_error("No valid Movie Render Graph search paths were provided.")
         return None
 
-    asset_registry = unreal.AssetRegistryHelpers.get_asset_registry()
-    candidates = editor_asset_lib.list_assets(MRG_SETTINGS_FOLDER, recursive=True, include_folder=False)
+    _log(f"Movie Render Graph search paths: {search_paths}")
 
-    for object_path in candidates:
+    all_candidate_object_paths = []
+    seen_object_paths = set()
+
+    for search_path in search_paths:
+        if not editor_asset_lib.does_directory_exist(search_path):
+            _log_warning(f"Movie Render Graph folder not found: {search_path}")
+            continue
+
+        folder_candidates = editor_asset_lib.list_assets(search_path, recursive=True, include_folder=False)
+        _log(f"Found {len(folder_candidates)} asset candidate(s) under Movie Render Graph folder: {search_path}")
+
+        for object_path in folder_candidates:
+            if object_path in seen_object_paths:
+                continue
+            seen_object_paths.add(object_path)
+            all_candidate_object_paths.append(object_path)
+
+    if not all_candidate_object_paths:
+        _log_error(
+            "Could not find any Movie Render Graph asset candidates in search paths: "
+            + ", ".join(search_paths)
+        )
+        return None
+
+    for object_path in all_candidate_object_paths:
         leaf_name = object_path.rsplit("/", 1)[-1]
         asset_name = leaf_name.split(".", 1)[0]
         if asset_name != requested_name:
@@ -429,7 +493,10 @@ def _find_movie_render_graph_asset(movie_render_graph_name):
         _log(f"Resolved Movie Render Graph asset '{requested_name}' -> {object_path}")
         return graph_asset
 
-    _log_error(f"Could not find Movie Render Graph asset named '{requested_name}' in {MRG_SETTINGS_FOLDER}")
+    _log_error(
+        f"Could not find Movie Render Graph asset named '{requested_name}' "
+        f"in search paths: {search_paths}"
+    )
     return None
 
 
@@ -916,7 +983,14 @@ def _apply_job_output_overrides(job, graph_asset, output_directory, file_name_fo
     return "configured"
 
 
-def run(shot_name_array, is_active_array, is_hero_array, movie_render_graph):
+def run(
+    shot_name_array,
+    is_active_array,
+    is_hero_array,
+    movie_render_graph,
+    render_graph_folder_path=None,
+    render_graph_secondary_folder_path=None,
+):
     result = _new_result(movie_render_graph)
 
     try:
@@ -962,7 +1036,11 @@ def run(shot_name_array, is_active_array, is_hero_array, movie_render_graph):
             _finalize_result(result, success=False, message="MoviePipelineExecutorJob class was unavailable.")
         )
 
-    graph_asset = _find_movie_render_graph_asset(movie_render_graph)
+    graph_asset = _find_movie_render_graph_asset(
+        movie_render_graph,
+        render_graph_folder_path,
+        render_graph_secondary_folder_path,
+    )
     if not graph_asset:
         return _format_summary_string(
             _finalize_result(
