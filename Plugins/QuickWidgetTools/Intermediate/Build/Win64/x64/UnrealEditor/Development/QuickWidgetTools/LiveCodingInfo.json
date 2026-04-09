@@ -1,9 +1,0 @@
-{
-	"RemapUnityFiles": 
-	{
-		"Module.QuickWidgetTools.cpp.obj": [
-			"PerModuleInline.gen.cpp.obj",
-			"QuickWidgetTools.cpp.obj"
-		]
-	}
-}
