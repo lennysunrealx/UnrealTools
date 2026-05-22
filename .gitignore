@@ -1,0 +1,54 @@
+# Unreal Engine
+Binaries/
+DerivedDataCache/
+Intermediate/
+Saved/
+
+# Visual Studio
+.vs/
+*.VC.db
+*.VC.opendb
+*.sln
+.vsconfig
+
+# Rider / JetBrains
+.idea/
+
+# Build artifacts
+*.obj
+*.pdb
+*.exe
+*.dll
+
+# Logs
+*.log
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# User-specific config
+Config/DefaultEditorPerProjectUserSettings.ini
+
+# Plugin temp/build folders
+Plugins/*/Binaries/
+Plugins/*/Intermediate/
+Plugins/*/Saved/
+
+# Ignore all Content by default
+Content/*
+
+# Re-open Content so selected subfolders can be tracked
+!Content/
+
+# Allow these folders themselves
+!Content/_Tools/
+!Content/_Tools/**
+
+# Allow everything inside them
+!Content/BlueprintTools/**
+!Content/PythonTools/**
+# Local pipeline secrets / machine-specific config
+Plugins/QuickWidgetTools/Content/Python/clickup_data*.json

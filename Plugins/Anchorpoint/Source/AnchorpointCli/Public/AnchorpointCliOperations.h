@@ -1,0 +1,59 @@
+// Copyright (C) 2024-2025 Anchorpoint Software GmbH. All rights reserved.
+
+#pragma once
+
+#include "AnchorpointCliStatus.h"
+
+class FAnchorpointCliProcess;
+
+class FAnchorpointVersion
+{
+public:
+	FAnchorpointVersion(int InMajor, int InMinor, int InPatch);
+
+	bool IsCurrent(int InMajor, int InMinor, int InPatch) const;
+	bool IsAfter(int InMajor, int InMinor, int InPatch) const;
+	bool IsAfterOrCurrent(int InMajor, int InMinor, int InPatch) const;
+	bool IsBefore(int InMajor, int InMinor, int InPatch) const;
+	bool IsBeforeOrCurrent(int InMajor, int InMinor, int InPatch) const;
+
+private:
+	bool IsDev() const;
+
+	int MajorVersion = INDEX_NONE;
+	int MinorVersion = INDEX_NONE;
+	int PatchVersion = INDEX_NONE;
+};
+
+namespace AnchorpointCliOperations
+{
+	ANCHORPOINTCLI_API bool IsInstalled();
+	ANCHORPOINTCLI_API void ShowInAnchorpoint(FString InPath = TEXT(""));
+
+	ANCHORPOINTCLI_API FString GetRepositoryRootPath();
+	ANCHORPOINTCLI_API bool IsUnderRepositoryPath(const FString& InPath);
+	ANCHORPOINTCLI_API FString ConvertFullPathToApInternal(const FString& InFullPath);
+	ANCHORPOINTCLI_API FString ConvertApInternalToFull(const FString& InRelativePath);
+	ANCHORPOINTCLI_API FString ConvertFullPathToProjectRelative(const FString& InPath);
+
+	ANCHORPOINTCLI_API TValueOrError<FAnchorpointVersion, FString> GetCliVersion();
+	ANCHORPOINTCLI_API TValueOrError<bool, FString> IsLoggedIn(bool bSkipCache = false);
+	ANCHORPOINTCLI_API TValueOrError<FString, FString> GetCurrentUser();
+	ANCHORPOINTCLI_API TValueOrError<FString, FString> GetUserDisplayName(const FString& InUserEmail);
+
+	ANCHORPOINTCLI_API TValueOrError<FAnchorpointStatus, FString> GetStatus(const TArray<FString>& InFiles, bool bForced = false);
+	ANCHORPOINTCLI_API TValueOrError<FString, FString> DisableAutoLock();
+	ANCHORPOINTCLI_API TValueOrError<FString, FString> LockFiles(const TArray<FString>& InFiles);
+	ANCHORPOINTCLI_API TValueOrError<FString, FString> UnlockFiles(const TArray<FString>& InFiles);
+	ANCHORPOINTCLI_API TValueOrError<FString, FString> Revert(const TArray<FString>& InFiles);
+	ANCHORPOINTCLI_API TValueOrError<FString, FString> DeleteFiles(const TArray<FString>& InFiles);
+	ANCHORPOINTCLI_API TValueOrError<FString, FString> SubmitFiles(const TArray<FString> InFiles, const FString& InMessage);
+
+	ANCHORPOINTCLI_API TValueOrError<FAnchorpointConflictStatus, FString> GetConflictStatus(const FString& InFile);
+	ANCHORPOINTCLI_API TValueOrError<FAnchorpointHistory, FString> GetHistoryInfo(const FString& InFile);
+	ANCHORPOINTCLI_API TValueOrError<FString, FString> DownloadFileViaCommitId(const FString& InCommitId, const FString& InFile, const FString& Destination);
+	ANCHORPOINTCLI_API TValueOrError<FString, FString> DownloadFileViaOID(const FString& InOID, const FString& InFile, const FString& Destination);
+	ANCHORPOINTCLI_API TValueOrError<FString, FString> MarkConflictSolved(const TArray<FString>& InFiles);
+
+	ANCHORPOINTCLI_API void MonitorProcessWithNotification(const TSharedRef<FAnchorpointCliProcess>& InProcess, const FText& ProgressText, const FText& FinishText);
+}
