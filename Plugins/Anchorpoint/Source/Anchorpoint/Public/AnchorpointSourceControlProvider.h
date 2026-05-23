@@ -1,4 +1,4 @@
-// Copyright (C) 2024-2025 Anchorpoint Software GmbH. All rights reserved.
+﻿// Copyright (C) 2024-2025 Anchorpoint Software GmbH. All rights reserved.
 
 #pragma once
 
@@ -62,8 +62,7 @@ public:
 #if ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 8)
 	virtual TOptional<bool> HasChangesToSync() const override;
 	virtual TOptional<bool> HasChangesToCheckIn() const override;
-#endif
-#if ENGINE_MAJOR_VERSION < 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 8)
+#else
 	virtual TOptional<bool> IsAtLatestRevision() const override;
 	virtual TOptional<int> GetNumLocalChanges() const override;
 #endif
@@ -73,8 +72,6 @@ public:
 
 	void OnStatesChanged();
 	void TickDuringModal(float DeltaTime);
-	void HandlePackageSaved(const FString& InPackageFilename, UPackage* InPackage, FObjectPostSaveContext InObjectSaveContext);
-	void RefreshStatus();
 
 	TSharedRef<FAnchorpointSourceControlState> GetStateInternal(const FString& Filename);
 	FDateTime GetLastSyncTime() const;
@@ -93,8 +90,6 @@ public:
 	
 	FText GetPromptTextForOperation(const FSourceControlOperationRef& InOperation) const;
 
-	FTimerHandle RefreshTimerHandle;
-	float RefreshDelay = 1.0f;
 
 	enum class EActiveModalState
 	{

@@ -1,4 +1,4 @@
-// Copyright (C) 2024-2025 Anchorpoint Software GmbH. All rights reserved.
+﻿// Copyright (C) 2024-2025 Anchorpoint Software GmbH. All rights reserved.
 
 #include "AnchorpointSourceControlProvider.h"
 
@@ -6,7 +6,6 @@
 #include <ScopedSourceControlProgress.h>
 #include <SourceControlOperations.h>
 #include <ISourceControlModule.h>
-#include <UObject/ObjectSaveContext.h>
 #include <Logging/MessageLog.h>
 #include <FileHelpers.h>
 #include <Interfaces/IPluginManager.h>
@@ -23,8 +22,6 @@
 
 FAnchorpointSourceControlProvider::FAnchorpointSourceControlProvider()
 {
-	UPackage::PackageSavedWithContextEvent.AddRaw(this, &FAnchorpointSourceControlProvider::HandlePackageSaved);
-
 	if(FSlateApplication::IsInitialized())
 	{
 		FSlateApplication::Get().GetOnModalLoopTickEvent().AddRaw(this, &FAnchorpointSourceControlProvider::TickDuringModal);
@@ -33,8 +30,6 @@ FAnchorpointSourceControlProvider::FAnchorpointSourceControlProvider()
 
 FAnchorpointSourceControlProvider::~FAnchorpointSourceControlProvider()
 {
-	UPackage::PackageSavedWithContextEvent.RemoveAll(this);
-
 	if(FSlateApplication::IsInitialized())
 	{
 		FSlateApplication::Get().GetOnModalLoopTickEvent().RemoveAll(this);
@@ -411,20 +406,23 @@ bool FAnchorpointSourceControlProvider::AllowsDiffAgainstDepot() const
 #if ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 8)
 TOptional<bool> FAnchorpointSourceControlProvider::HasChangesToSync() const
 {
-	// UE 5.8 requires providers to answer this, but Anchorpoint does not currently track
-	// a cheap global "needs sync" status here. Return unset so Unreal treats it as unknown.
+	//NOTE: We don't support 'Sync' anyway. @see AnchorpointSourceControlState::IsCurrent()
 	return TOptional<bool>();
 }
 
 TOptional<bool> FAnchorpointSourceControlProvider::HasChangesToCheckIn() const
 {
-	// UE 5.8 requires providers to answer this, but Anchorpoint does not currently track
-	// a cheap global "needs check-in" status here. Return unset so Unreal treats it as unknown.
-	return TOptional<bool>();
-}
-#endif
+	for (const auto& State : StateCache)
+	{
+		if (State.Value->CanCheckIn())
+		{
+			return true;
+		}
+	}
 
-#if ENGINE_MAJOR_VERSION < 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION < 8)
+	return false;
+}
+#else
 TOptional<bool> FAnchorpointSourceControlProvider::IsAtLatestRevision() const
 {
 	// ToImplement: Here we should check if the file is up to date with the latest
@@ -540,24 +538,12 @@ void FAnchorpointSourceControlProvider::TickDuringModal(float DeltaTime)
 			// That is not needed in the usual flow because the CheckOut dialog will perform a forced fresh before showing,
 			// So we only need the updates while doing the ProjectConnect optimizations
 			UAnchorpointCliConnectSubsystem* ConnectSubsystem = GEditor->GetEditorSubsystem<UAnchorpointCliConnectSubsystem>();
-			if (ConnectSubsystem && ConnectSubsystem->IsProjectConnected())
+			if (ConnectSubsystem && ConnectSubsystem->GetCachedStatus().IsSet())
 			{
 				FAnchorpointHacksModule::RefreshOpenPackagesDialog();
 			}
 		}
 	}
-}
-
-void FAnchorpointSourceControlProvider::HandlePackageSaved(const FString& InPackageFilename, UPackage* InPackage, FObjectPostSaveContext InObjectSaveContext)
-{
-	// This will automatically clear and re-add if it's already on-going
-	FTimerDelegate RefreshDelegate = FTimerDelegate::CreateRaw(this, &FAnchorpointSourceControlProvider::RefreshStatus);
-	GEditor->GetTimerManager()->SetTimer(RefreshTimerHandle, RefreshDelegate, RefreshDelay, false);
-}
-
-void FAnchorpointSourceControlProvider::RefreshStatus()
-{
-	ISourceControlModule::Get().GetProvider().Execute(ISourceControlOperation::Create<FUpdateStatus>());
 }
 
 TSharedRef<FAnchorpointSourceControlState> FAnchorpointSourceControlProvider::GetStateInternal(const FString& Filename)

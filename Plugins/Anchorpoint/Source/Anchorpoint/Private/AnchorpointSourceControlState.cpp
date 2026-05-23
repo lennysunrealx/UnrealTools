@@ -220,6 +220,15 @@ const FDateTime& FAnchorpointSourceControlState::GetTimeStamp() const
 
 bool FAnchorpointSourceControlState::CanCheckIn() const
 {
+	if (IsConfigFile())
+	{
+		//NOTE: Since config files can be changed without being locked out we also allow submitting when unlocked
+		if (State == EAnchorpointState::UnlockedModified || State == EAnchorpointState::UnlockedDeleted)
+		{
+			return true;
+		}
+	}
+
 	return State == EAnchorpointState::Added
 		|| State == EAnchorpointState::LockedModified
 		|| State == EAnchorpointState::LockedDeleted
@@ -233,15 +242,11 @@ bool FAnchorpointSourceControlState::CanCheckout() const
 		//NOTE: Currently the SSettingsEditorCheckoutNotice supports only 2 states for version controlled files:
 		// 1. Needs to be checked out -> CanCheckout returns true.
 		// 2. Already is checked out -> CanCheckout return false.
-		
-		// You might wonder, does this mean the ini file shows up as 'already checked out' if the file is locked by someone else?
-		// Yes. In this case CanCheckout would return false (with the intention of saying: "You cannot check out this file, it is locked"),
-		// it will be interpreted as "This file doesn't need checkout, you are good to change it". (SSettingsEditorCheckoutNotice::Tick)
 
-		// Therefore we can just return the current checkout state:
-		return !IsCheckedOut();
+		// Since we don't require locking of ini files for writting to them, we can safely:
+		return false;
 	}
-	
+
 	return State == EAnchorpointState::UnlockedUnchanged
 		|| State == EAnchorpointState::UnlockedModified
 		|| State == EAnchorpointState::UnlockedDeleted
@@ -251,6 +256,13 @@ bool FAnchorpointSourceControlState::CanCheckout() const
 
 bool FAnchorpointSourceControlState::IsCheckedOut() const
 {
+	if (IsConfigFile())
+	{
+		//NOTE: To be able to submit files they need to be either: added, deleted or checked out.
+		// So even though ini files don't need to be checked out, we need to mark them as such to be able to submit them
+		return true;
+	}
+
 	return State == EAnchorpointState::Added
 		|| State == EAnchorpointState::AddedInMemory
 		|| State == EAnchorpointState::LockedModified
@@ -286,9 +298,10 @@ bool FAnchorpointSourceControlState::GetOtherBranchHeadModification(FString& Hea
 
 bool FAnchorpointSourceControlState::IsCurrent() const
 {
-	// TODO: Hack to disable the `Sync` option
-	return true;
+	// NOTE: Hack to disable the `Sync` option because git doesn't allow single file sync
 	// return State != EAnchorpointState::OutDated;
+
+	return true;
 }
 
 bool FAnchorpointSourceControlState::IsSourceControlled() const
