@@ -1,0 +1,11 @@
+Binaries/
+Intermediate/
+
+# Do not ignore Binaries/Win64
+!Binaries/Win64/
+
+# Ignore everything in Binaries/Win64
+Binaries/Win64/*
+
+# Do not ignore Binaries/Win64/sync.dll
+!Binaries/Win64/sync.dll
