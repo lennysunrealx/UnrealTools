@@ -4,6 +4,7 @@ import unreal
 
 LOG_PREFIX = "[CreateCoreSubSequences]"
 SUBSEQUENCE_SUFFIXES = ["ANM", "CAM", "ENV", "FX", "LGT", "LVL", "PREVIS"]
+DEFAULT_SUBSEQUENCE_VERSION = 1
 
 
 def _log(message):
@@ -29,6 +30,32 @@ def _sanitize_shot_name(value):
 
 def _is_valid_frame_number(value):
     return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _format_version_number(version_number):
+    return f"v{int(version_number):03d}"
+
+
+def _get_object_path_from_package_path(package_path):
+    asset_name = package_path.rsplit("/", 1)[-1]
+    return f"{package_path}.{asset_name}"
+
+
+def _get_package_path_from_object_path(object_path):
+    folder_path, asset_reference_name = object_path.rsplit("/", 1)
+    package_name = asset_reference_name.split(".", 1)[0]
+    return f"{folder_path}/{package_name}"
+
+
+def _add_asset_path_variants(path_set, asset_path):
+    if not asset_path:
+        return
+
+    path_set.add(asset_path)
+
+    package_path = _get_package_path_from_object_path(asset_path)
+    path_set.add(package_path)
+    path_set.add(_get_object_path_from_package_path(package_path))
 
 
 def _ensure_folder(path):
@@ -136,7 +163,7 @@ def _build_existing_subsequence_path_set(master_sequence):
             sub_sequence = _get_subsequence_reference(section)
             if not sub_sequence:
                 continue
-            existing_paths.add(sub_sequence.get_path_name())
+            _add_asset_path_variants(existing_paths, sub_sequence.get_path_name())
     return existing_paths
 
 
@@ -197,12 +224,13 @@ def run(show_name, shot_name, start_frame, end_frame):
         return sub_sequences
 
     shot_folder = master_sequence_path
-    shot_subsequence_folder = f"{shot_folder}/SubSequences"
+    shot_subsequence_root_folder = f"{shot_folder}/SubSequences"
+    version_suffix = _format_version_number(DEFAULT_SUBSEQUENCE_VERSION)
 
     if not _ensure_folder(shot_folder):
         return sub_sequences
 
-    if not _ensure_folder(shot_subsequence_folder):
+    if not _ensure_folder(shot_subsequence_root_folder):
         return sub_sequences
 
     asset_tools = unreal.AssetToolsHelpers.get_asset_tools()
@@ -211,8 +239,12 @@ def run(show_name, shot_name, start_frame, end_frame):
     subsequence_assets = []
 
     for suffix in SUBSEQUENCE_SUFFIXES:
-        asset_name = f"{sanitized_shot_name}_{suffix}"
-        asset_path = f"{shot_subsequence_folder}/{asset_name}"
+        subsequence_folder = f"{shot_subsequence_root_folder}/{suffix}"
+        if not _ensure_folder(subsequence_folder):
+            return []
+
+        asset_name = f"{sanitized_shot_name}_{suffix}_{version_suffix}"
+        asset_path = f"{subsequence_folder}/{asset_name}"
 
         if unreal.EditorAssetLibrary.does_asset_exist(asset_path):
             loaded_subsequence = unreal.EditorAssetLibrary.load_asset(asset_path)
@@ -224,7 +256,7 @@ def run(show_name, shot_name, start_frame, end_frame):
             _log(f"Creating subsequence: {asset_path}")
             loaded_subsequence = asset_tools.create_asset(
                 asset_name=asset_name,
-                package_path=shot_subsequence_folder,
+                package_path=subsequence_folder,
                 asset_class=unreal.LevelSequence,
                 factory=factory,
             )
@@ -247,7 +279,10 @@ def run(show_name, shot_name, start_frame, end_frame):
     modified_master = False
 
     for asset_path, subsequence_asset in subsequence_assets:
-        if asset_path in existing_references:
+        asset_path_variants = set()
+        _add_asset_path_variants(asset_path_variants, asset_path)
+
+        if existing_references.intersection(asset_path_variants):
             _log(f"Subsequence already referenced in master, skipping track creation: {asset_path}")
             continue
 
@@ -270,7 +305,7 @@ def run(show_name, shot_name, start_frame, end_frame):
         else:
             _log(f"Section range API not available; skipped explicit range set for: {asset_path}")
 
-        existing_references.add(asset_path)
+        _add_asset_path_variants(existing_references, asset_path)
         modified_master = True
         _log(f"Added subsequence to master sequence: {asset_path}")
 
