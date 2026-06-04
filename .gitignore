@@ -1,52 +1,107 @@
-# Unreal Engine
-Binaries/
-DerivedDataCache/
-Intermediate/
-Saved/
+# -----------------------------------------------------------------------------
+# Unreal Engine project generated files
+# -----------------------------------------------------------------------------
+/Binaries/
+/DerivedDataCache/
+/Intermediate/
+/Saved/
 
-# Visual Studio
-.vs/
-*.VC.db
-*.VC.opendb
-*.sln
-.vsconfig
+# Plugin generated files
+/Plugins/*/Binaries/
+/Plugins/*/DerivedDataCache/
+/Plugins/*/Intermediate/
+/Plugins/*/Saved/
 
-# Rider / JetBrains
-.idea/
+# Unreal generated solution / project files
+/*.sln
+/*.suo
+/*.opensdf
+/*.sdf
+/*.VC.db
+/*.VC.opendb
+/.vs/
+/.vsconfig
 
-# Build artifacts
+# -----------------------------------------------------------------------------
+# IDE / editor user files
+# -----------------------------------------------------------------------------
+/.idea/
+*.user
+*.userosscache
+*.sln.docstates
+*.rsuser
+
+# -----------------------------------------------------------------------------
+# Build artifacts and debug symbols
+# -----------------------------------------------------------------------------
 *.obj
+*.o
+*.pch
+*.ilk
+*.ipdb
+*.iobj
+*.exp
+*.lib
 *.pdb
-*.exe
 *.dll
+*.exe
+*.app
 
-# Logs
+# Live Coding / hot reload artifacts
+*.patch_*.dll
+*.patch_*.pdb
+*.modules
+
+# -----------------------------------------------------------------------------
+# Logs, crash dumps, temp files
+# -----------------------------------------------------------------------------
 *.log
+*.tmp
+*.temp
+*.bak
+*.swp
+*.dmp
 
-# Python
+# -----------------------------------------------------------------------------
+# Python generated files
+# -----------------------------------------------------------------------------
 __pycache__/
-*.pyc
+*.py[cod]
 *.pyo
 *.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 
-# User-specific config
-Config/DefaultEditorPerProjectUserSettings.ini
+# -----------------------------------------------------------------------------
+# Operating system junk
+# -----------------------------------------------------------------------------
+.DS_Store
+Thumbs.db
+desktop.ini
 
-# Plugin temp/build folders
-Plugins/*/Binaries/
-Plugins/*/Intermediate/
-Plugins/*/Saved/
+# -----------------------------------------------------------------------------
+# User-specific Unreal config
+# -----------------------------------------------------------------------------
+/Config/DefaultEditorPerProjectUserSettings.ini
+/Config/DefaultEditor.ini.tmp
 
-# Ignore all Content by default
-Content/*
+# -----------------------------------------------------------------------------
+# Root Content allow-list
+#
+# This repo intentionally ignores most root /Content files, then allows only the
+# tool folders below. Plugin content under /Plugins/.../Content is not affected
+# by this section.
+# -----------------------------------------------------------------------------
+/Content/*
+!/Content/
 
-# Re-open Content so selected subfolders can be tracked
-!Content/
+# Keep selected root Content tool folders
+!/Content/_Tools/
+!/Content/_Tools/**
 
-# Allow these folders themselves
-!Content/_Tools/
-!Content/_Tools/**
+!/Content/BlueprintTools/
+!/Content/BlueprintTools/**
 
-# Allow everything inside them
-!Content/BlueprintTools/**
-!Content/PythonTools/**
+!/Content/PythonTools/
+!/Content/PythonTools/**
