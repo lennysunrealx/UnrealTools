@@ -3,7 +3,7 @@ import unreal
 
 
 LOG_PREFIX = "[CreateCoreSubSequences]"
-SUBSEQUENCE_SUFFIXES = ["ANM", "CAM", "ENV", "FX", "LGT", "LVL"]
+SUBSEQUENCE_SUFFIXES = ["ANM", "CAM", "ENV", "FX", "LGT", "LVL", "PREVIS"]
 
 
 def _log(message):
