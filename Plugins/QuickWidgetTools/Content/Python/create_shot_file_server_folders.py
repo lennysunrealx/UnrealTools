@@ -54,7 +54,7 @@ SHOT_RELATIVE_FOLDER_TEMPLATES = (
     "sequences/{sequence_name}/{shot_name}/fx/houdini",
 
     "sequences/{sequence_name}/{shot_name}/lite/_output",
-    "sequences/{sequence_name}/{shot_name}/lite/unreal/_output/{shot_name}_beauty_v001",
+    "sequences/{sequence_name}/{shot_name}/lite/unreal/_output",
     "sequences/{sequence_name}/{shot_name}/lite/unreal/_output/_hero",
 
     "sequences/{sequence_name}/{shot_name}/lvl/_output",
