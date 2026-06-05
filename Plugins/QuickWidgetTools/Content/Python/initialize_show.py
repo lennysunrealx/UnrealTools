@@ -10,8 +10,8 @@ Designed to be called from an Editor Utility Widget via:
 
 What it does:
 - Accepts a show name string from Blueprint
-- Sanitizes it into a safe Unreal folder name like: _MyCoolShow
-- Creates the folder tree under /Game/_ShowName
+- Sanitizes it into a safe Unreal folder name like: _s3bishop
+- Creates the folder tree under /Game/_showname
 - Creates a Blueprint asset named "_showholder" in the root show folder
 - Creates a Blueprint asset named "_folderholder" in each subfolder
 - The Blueprint parent class is Object
@@ -28,7 +28,7 @@ import unreal
 # Config
 # -----------------------------------------------------------------------------
 
-DEFAULT_SHOW_NAME = "ShowName"
+DEFAULT_SHOW_NAME = "showname"
 PLACEHOLDER_ASSET_NAME = "_folderholder"
 ROOT_PLACEHOLDER_ASSET_NAME = "_showholder"
 
@@ -71,28 +71,33 @@ def log_error(message):
 # Name utilities
 # -----------------------------------------------------------------------------
 
-def to_pascal_case(raw_text):
+def to_lower_safe_name(raw_text):
     parts = re.findall(r"[A-Za-z0-9]+", raw_text or "")
-    return "".join(part[:1].upper() + part[1:] for part in parts if part)
+    return "".join(parts).lower()
 
 
 def sanitize_show_name(user_text):
     """
     Rules:
     - remove spaces / symbols
-    - convert to PascalCase
+    - convert to lowercase
     - prevent empty result
     - prevent starting with a number
     - prefix underscore so it sorts near the top
+
+    Examples:
+        "s3bishop" -> "_s3bishop"
+        "S3Bishop" -> "_s3bishop"
+        "My Cool Show" -> "_mycoolshow"
     """
-    cleaned = to_pascal_case((user_text or "").strip())
-    cleaned = re.sub(r"[^A-Za-z0-9]", "", cleaned)
+    cleaned = to_lower_safe_name((user_text or "").strip())
+    cleaned = re.sub(r"[^a-z0-9]", "", cleaned)
 
     if not cleaned:
         cleaned = DEFAULT_SHOW_NAME
 
     if cleaned[0].isdigit():
-        cleaned = "Show" + cleaned
+        cleaned = "show" + cleaned
 
     return "_" + cleaned
 
