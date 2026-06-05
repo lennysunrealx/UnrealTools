@@ -15,10 +15,11 @@ Blueprint usage:
     import create_shot_file_server_folders
     import importlib
     importlib.reload(create_shot_file_server_folders)
-    success = create_shot_file_server_folders.run(show_name, shot_name)
+    success = create_shot_file_server_folders.run(show_name, sequence_name, shot_name)
 
 Example:
     show root: F:/Defect Dropbox/defect/s3bishop
+    sequence_name: ABC
     shot_name: ABC_000_0050
 
 Creates:
@@ -99,6 +100,13 @@ def _sanitize_show_name(value):
     if value is None:
         return ""
     return str(value).strip()
+
+
+def _sanitize_sequence_name(value):
+    if value is None:
+        return ""
+    cleaned = re.sub(r"[^A-Za-z0-9_]", "", str(value))
+    return cleaned.upper()
 
 
 def _sanitize_shot_name(value):
@@ -278,22 +286,30 @@ def _create_folders(show_root, relative_folder_paths):
     return created_folders, existing_folders, missing_folders
 
 
-def run(show_name, shot_name):
+def run(show_name, sequence_name, shot_name):
     try:
         _log(f"Raw show_name input: {show_name}")
+        _log(f"Raw sequence_name input: {sequence_name}")
         _log(f"Raw shot_name input: {shot_name}")
 
         sanitized_show_name = _sanitize_show_name(show_name)
+        sanitized_sequence_name = _sanitize_sequence_name(sequence_name)
         sanitized_shot_name = _sanitize_shot_name(shot_name)
+
+        if not sanitized_sequence_name:
+            _log_error("sequence_name was empty after sanitizing.")
+            return ""
 
         if not sanitized_shot_name:
             _log_error("shot_name was empty after sanitizing.")
             return ""
 
-        sequence_name = _derive_sequence_name(sanitized_shot_name)
-        if not sequence_name:
-            _log_error("Could not derive sequence name from shot_name.")
-            return ""
+        derived_sequence_name = _derive_sequence_name(sanitized_shot_name)
+        if derived_sequence_name and derived_sequence_name != sanitized_sequence_name:
+            _log_warning(
+                f"Input sequence_name '{sanitized_sequence_name}' does not match sequence derived from shot_name '{derived_sequence_name}'. "
+                f"Using input sequence_name '{sanitized_sequence_name}'."
+            )
 
         show_root = _get_saved_show_file_server_path()
         if not show_root:
@@ -304,12 +320,12 @@ def run(show_name, shot_name):
             return ""
 
         _log(f"Using show file server path: {show_root}")
-        _log(f"Derived sequence name: {sequence_name}")
+        _log(f"Sanitized sequence name: {sanitized_sequence_name}")
         _log(f"Sanitized shot name: {sanitized_shot_name}")
 
         _log_manifest_status(show_root, sanitized_show_name)
 
-        relative_folder_paths = _build_relative_folder_paths(sequence_name, sanitized_shot_name)
+        relative_folder_paths = _build_relative_folder_paths(sanitized_sequence_name, sanitized_shot_name)
         created_folders, existing_folders, missing_folders = _create_folders(show_root, relative_folder_paths)
 
         _log(f"Created folders: {len(created_folders)}")
