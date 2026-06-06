@@ -1,5 +1,5 @@
 """
-Duplicate an existing shot Level Sequence and its shot subsequences.
+Duplicate an existing shot Level Sequence, its shot subsequences, and its shot data asset.
 
 Blueprint usage:
     import create_duplicate_shot
@@ -22,6 +22,8 @@ What this does:
     - Renames duplicated subsequence assets from old_shot_name to new_shot_name.
     - Places duplicated subsequences into the matching new SubSequences subfolders.
     - Rebuilds the new master sequence with the duplicated subsequences.
+    - Duplicates the old shot data asset to <new_shot_name>_Data when one exists.
+    - Updates common shot data properties on the duplicated data asset.
 
 Returns:
     str: New master sequence asset path on success, or "" on failure.
@@ -239,6 +241,26 @@ def _frame_to_int(value):
         return None
 
 
+def _get_sequence_playback_start(sequence):
+    if hasattr(sequence, "get_playback_start"):
+        try:
+            return _frame_to_int(sequence.get_playback_start())
+        except Exception:
+            return None
+
+    return None
+
+
+def _get_sequence_playback_end(sequence):
+    if hasattr(sequence, "get_playback_end"):
+        try:
+            return _frame_to_int(sequence.get_playback_end())
+        except Exception:
+            return None
+
+    return None
+
+
 def _get_section_start_frame(section):
     if hasattr(section, "get_start_frame"):
         try:
@@ -377,7 +399,7 @@ def _replace_shot_name_in_asset_name(old_asset_name, old_shot_name, new_shot_nam
         return old_asset_name.replace(old_shot_name, new_shot_name)
 
     _log_warning(
-        f"Subsequence asset name '{old_asset_name}' did not contain old shot name '{old_shot_name}'. "
+        f"Asset name '{old_asset_name}' did not contain old shot name '{old_shot_name}'. "
         f"Prefixing with new shot name."
     )
     return f"{new_shot_name}_{old_asset_name}"
@@ -508,6 +530,80 @@ def _duplicate_subsequence_assets(old_subsequence_root, new_subsequence_root, ol
     return duplicated_subsequence_items, old_to_new_package_path_map
 
 
+def _try_set_editor_property(asset_object, property_name, value):
+    try:
+        asset_object.set_editor_property(property_name, value)
+        _log(f"Set {property_name}={value!r}")
+        return True
+    except Exception:
+        return False
+
+
+def _update_duplicated_shot_data_asset(asset_object, asset_path, sequence_name, new_shot_name, start_frame, end_frame):
+    if not asset_object:
+        _log_error(f"Shot data asset object is invalid: {asset_path}")
+        return ""
+
+    _try_set_editor_property(asset_object, "IsActive", True)
+
+    if start_frame is not None:
+        _try_set_editor_property(asset_object, "StartFrame", int(start_frame))
+
+    if end_frame is not None:
+        _try_set_editor_property(asset_object, "EndFrame", int(end_frame))
+
+    # Optional metadata fields. Some versions of BP_ShotDataAsset may not have these.
+    for property_name in ("ShotName", "Shot", "ShotId", "ShotID"):
+        if _try_set_editor_property(asset_object, property_name, new_shot_name):
+            break
+
+    for property_name in ("SequenceName", "Sequence", "SequenceId", "SequenceID"):
+        if _try_set_editor_property(asset_object, property_name, sequence_name):
+            break
+
+    if not unreal.EditorAssetLibrary.save_loaded_asset(asset_object):
+        _log_error(f"Failed to save duplicated shot data asset: {asset_path}")
+        return ""
+
+    _log(f"Saved duplicated shot data asset: {asset_path}")
+    return asset_path
+
+
+def _duplicate_shot_data_asset(old_shot_folder, new_shot_folder, old_shot_name, new_shot_name, sequence_name, start_frame, end_frame):
+    old_data_asset_name = f"{old_shot_name}_Data"
+    new_data_asset_name = f"{new_shot_name}_Data"
+    old_data_asset_path = f"{old_shot_folder}/{old_data_asset_name}"
+    new_data_asset_path = f"{new_shot_folder}/{new_data_asset_name}"
+
+    if not unreal.EditorAssetLibrary.does_asset_exist(old_data_asset_path):
+        _log_warning(f"Old shot data asset does not exist, skipping data asset duplicate: {old_data_asset_path}")
+        return ""
+
+    if unreal.EditorAssetLibrary.does_asset_exist(new_data_asset_path):
+        _log_error(f"New shot data asset already exists: {new_data_asset_path}")
+        return ""
+
+    _log(f"Duplicating shot data asset: {old_data_asset_path} -> {new_data_asset_path}")
+    duplicated_asset = unreal.EditorAssetLibrary.duplicate_asset(old_data_asset_path, new_data_asset_path)
+    if not duplicated_asset:
+        _log_error(f"Failed to duplicate shot data asset: {old_data_asset_path} -> {new_data_asset_path}")
+        return ""
+
+    loaded_asset = unreal.EditorAssetLibrary.load_asset(new_data_asset_path)
+    if not loaded_asset:
+        _log_error(f"Duplicated shot data asset could not be loaded: {new_data_asset_path}")
+        return ""
+
+    return _update_duplicated_shot_data_asset(
+        loaded_asset,
+        new_data_asset_path,
+        sequence_name,
+        new_shot_name,
+        start_frame,
+        end_frame,
+    )
+
+
 def _rebuild_master_subsequence_tracks(master_sequence, duplicated_subsequence_items, old_section_descriptors, old_to_new_package_path_map):
     added_sections = 0
 
@@ -543,20 +639,8 @@ def _rebuild_master_subsequence_tracks(master_sequence, duplicated_subsequence_i
 
     _log_warning("No subsequences were rebuilt from old master references. Falling back to all duplicated subsequences.")
     for new_asset_path, new_subsequence_asset in duplicated_subsequence_items:
-        playback_start = None
-        playback_end = None
-
-        if hasattr(new_subsequence_asset, "get_playback_start"):
-            try:
-                playback_start = int(new_subsequence_asset.get_playback_start())
-            except Exception:
-                playback_start = None
-
-        if hasattr(new_subsequence_asset, "get_playback_end"):
-            try:
-                playback_end = int(new_subsequence_asset.get_playback_end())
-            except Exception:
-                playback_end = None
+        playback_start = _get_sequence_playback_start(new_subsequence_asset)
+        playback_end = _get_sequence_playback_end(new_subsequence_asset)
 
         if _add_subsequence_to_master(
             master_sequence,
@@ -636,6 +720,8 @@ def run(show_name, sequence_name, old_shot_name, new_shot_name):
         old_subsequence_root = f"{old_master_sequence_path}/SubSequences"
         new_shot_folder = new_master_sequence_path
         new_subsequence_root = f"{new_shot_folder}/SubSequences"
+        old_data_asset_path = f"{old_master_sequence_path}/{sanitized_old_shot_name}_Data"
+        new_data_asset_path = f"{new_shot_folder}/{sanitized_new_shot_name}_Data"
 
         if not unreal.EditorAssetLibrary.does_directory_exist(base_sequence_folder):
             _log_error(f"Sequence folder does not exist: {base_sequence_folder}")
@@ -656,6 +742,15 @@ def run(show_name, sequence_name, old_shot_name, new_shot_name):
         if unreal.EditorAssetLibrary.does_directory_exist(new_shot_folder):
             _log_error(f"New shot content folder already exists: {new_shot_folder}")
             return ""
+
+        if unreal.EditorAssetLibrary.does_asset_exist(new_data_asset_path):
+            _log_error(f"New shot data asset already exists: {new_data_asset_path}")
+            return ""
+
+        if unreal.EditorAssetLibrary.does_asset_exist(old_data_asset_path):
+            _log(f"Old shot data asset found: {old_data_asset_path}")
+        else:
+            _log_warning(f"Old shot data asset not found. Duplicate will continue without data asset: {old_data_asset_path}")
 
         old_master_sequence = unreal.EditorAssetLibrary.load_asset(old_master_sequence_path)
         if not old_master_sequence or not isinstance(old_master_sequence, unreal.LevelSequence):
@@ -702,6 +797,23 @@ def run(show_name, sequence_name, old_shot_name, new_shot_name):
                 return ""
         else:
             _log_warning("No subsequence mapping was created. The new master sequence will remain without subsequences.")
+
+        master_start_frame = _get_sequence_playback_start(new_master_sequence)
+        master_end_frame = _get_sequence_playback_end(new_master_sequence)
+
+        if unreal.EditorAssetLibrary.does_asset_exist(old_data_asset_path):
+            duplicated_data_asset_path = _duplicate_shot_data_asset(
+                old_master_sequence_path,
+                new_shot_folder,
+                sanitized_old_shot_name,
+                sanitized_new_shot_name,
+                sanitized_sequence_name,
+                master_start_frame,
+                master_end_frame,
+            )
+            if not duplicated_data_asset_path:
+                _log_error("Shot data asset duplicate failed.")
+                return ""
 
         if not unreal.EditorAssetLibrary.save_loaded_asset(new_master_sequence):
             _log_error(f"Failed to save duplicated master sequence: {new_master_sequence_path}")
