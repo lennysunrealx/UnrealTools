@@ -12,8 +12,8 @@ What this does:
     - Reads ShowFileServerPath from QuickWidgetToolsSettings.ini.
     - Finds/creates the assets folder inside the saved show root.
     - Creates an asset folder named after asset_name.
-    - Creates the same asset department/software folder structure used by
-      PortablePipeTools show_manager_core.py.
+    - Creates a curated asset folder scaffold, using the same explicit-template style
+      as create_shot_file_server_folders.py.
 
 Example:
     ShowFileServerPath=F:/Defect Dropbox/defect/s3bishop
@@ -38,31 +38,40 @@ _SECTION = "/Script/QuickWidgetTools.RenderToolSettings"
 _SHOW_FILE_SERVER_PATH_KEY = "ShowFileServerPath"
 ASSETS_FOLDER_NAME = "assets"
 
-ASSET_DEPARTMENT_FOLDERS = (
-    "_output",
-    "anim",
-    "rig",
-    "fx",
-    "lite",
-    "lvl",
-    "comp",
-    "mesh",
-    "reference",
-)
+ASSET_RELATIVE_FOLDER_TEMPLATES = (
+    "{asset_name}",
+    "{asset_name}/_output",
+    "{asset_name}/reference",
 
-ASSET_SOFTWARE_FOLDERS = (
-    "_output",
-    "unreal",
-    "maya",
-    "blender",
-    "substance",
-    "houdini",
-    "nuke",
-    "davinci",
-    "katana",
-    "zbrush",
-    "natron",
-    "emberliquigen",
+    "{asset_name}/anim/_output",
+    "{asset_name}/anim/maya",
+
+    "{asset_name}/rig/_output",
+    "{asset_name}/rig/maya",
+
+    "{asset_name}/fx/_output",
+    "{asset_name}/fx/houdini",
+    "{asset_name}/fx/emberLiquiGen",
+
+    "{asset_name}/lite/_output",
+    "{asset_name}/lite/unreal/_output",
+    "{asset_name}/lite/unreal/_output/_hero",
+
+    "{asset_name}/lvl/_output",
+    "{asset_name}/lvl/unreal",
+    "{asset_name}/lvl/maya",
+    "{asset_name}/lvl/blender",
+
+    "{asset_name}/comp/_output",
+    "{asset_name}/comp/nuke",
+    "{asset_name}/comp/natron",
+    "{asset_name}/comp/davinci",
+
+    "{asset_name}/mesh/_output",
+    "{asset_name}/mesh/maya",
+    "{asset_name}/mesh/blender",
+    "{asset_name}/mesh/zbrush",
+    "{asset_name}/mesh/substance",
 )
 
 
@@ -195,20 +204,9 @@ def _get_saved_show_file_server_path():
 
 
 def _build_relative_asset_folders(asset_name):
-    relative_folders = [asset_name]
-
-    for department_name in ASSET_DEPARTMENT_FOLDERS:
-        department_root = f"{asset_name}/{department_name}"
-        relative_folders.append(department_root)
-
-        # Match PortablePipeTools show_manager_core.py behavior.
-        # Avoid odd paths like assets/prp_Box/_output/_output.
-        if department_name == "_output":
-            continue
-
-        for software_name in ASSET_SOFTWARE_FOLDERS:
-            relative_folders.append(f"{department_root}/{software_name}")
-
+    relative_folders = []
+    for template in ASSET_RELATIVE_FOLDER_TEMPLATES:
+        relative_folders.append(template.format(asset_name=asset_name))
     return relative_folders
 
 
@@ -259,7 +257,9 @@ def run(asset_name):
         else:
             existing_count += 1
 
-        for relative_folder in _build_relative_asset_folders(sanitized_asset_name):
+        relative_asset_folders = _build_relative_asset_folders(sanitized_asset_name)
+
+        for relative_folder in relative_asset_folders:
             folder_path = os.path.join(assets_root, relative_folder)
             result = _create_folder(folder_path)
             if result == "created":
@@ -268,7 +268,7 @@ def run(asset_name):
                 existing_count += 1
 
         missing_folders = []
-        for relative_folder in _build_relative_asset_folders(sanitized_asset_name):
+        for relative_folder in relative_asset_folders:
             folder_path = os.path.normpath(os.path.join(assets_root, relative_folder))
             if not os.path.isdir(folder_path):
                 missing_folders.append(folder_path)
