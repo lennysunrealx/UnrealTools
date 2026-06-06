@@ -12,7 +12,6 @@ What this does:
     - Finds the Unreal show root by locating the root _showholder Blueprint asset.
     - Finds the Assets folder directly under that show root.
     - Creates an asset folder named after asset_name.
-    - Creates a Blueprint asset named _assetholder in that asset folder.
     - Creates _hero and sourceFiles subfolders inside the asset folder.
 
 Example:
@@ -20,7 +19,6 @@ Example:
 
 Creates:
     /Game/_s3bishop/Assets/prp_ExampleProp
-    /Game/_s3bishop/Assets/prp_ExampleProp/_assetholder
     /Game/_s3bishop/Assets/prp_ExampleProp/_hero
     /Game/_s3bishop/Assets/prp_ExampleProp/sourceFiles
 
@@ -36,7 +34,6 @@ import unreal
 LOG_PREFIX = "[CreateAssetFoldersUnreal]"
 ASSETS_FOLDER_NAME = "Assets"
 SHOW_HOLDER_ASSET_NAME = "_showholder"
-ASSET_HOLDER_ASSET_NAME = "_assetholder"
 ASSET_SUBFOLDERS = ("_hero", "sourceFiles")
 
 
@@ -142,45 +139,6 @@ def _find_show_root_from_showholder():
     return show_root
 
 
-def _ensure_assetholder_blueprint(asset_folder_path):
-    asset_path = f"{asset_folder_path}/{ASSET_HOLDER_ASSET_NAME}"
-
-    if unreal.EditorAssetLibrary.does_asset_exist(asset_path):
-        loaded_existing = unreal.EditorAssetLibrary.load_asset(asset_path)
-        if loaded_existing is not None:
-            _log(f"Asset holder already exists: {asset_path}")
-            return True
-
-        _log_warning(f"Found broken asset holder. Deleting so it can be recreated: {asset_path}")
-        if not unreal.EditorAssetLibrary.delete_asset(asset_path):
-            _log_error(f"Failed to delete broken asset holder: {asset_path}")
-            return False
-
-    asset_tools = unreal.AssetToolsHelpers.get_asset_tools()
-    factory = unreal.BlueprintFactory()
-    factory.set_editor_property("parent_class", unreal.Object)
-    factory.set_editor_property("edit_after_new", False)
-
-    _log(f"Creating asset holder Blueprint: {asset_path}")
-    asset_obj = asset_tools.create_asset(
-        asset_name=ASSET_HOLDER_ASSET_NAME,
-        package_path=asset_folder_path,
-        asset_class=unreal.Blueprint,
-        factory=factory,
-    )
-
-    if not asset_obj:
-        _log_error(f"Failed to create asset holder Blueprint: {asset_path}")
-        return False
-
-    if not unreal.EditorAssetLibrary.save_asset(asset_path, only_if_is_dirty=False):
-        _log_error(f"Created asset holder but failed to save: {asset_path}")
-        return False
-
-    _log(f"Created asset holder Blueprint: {asset_path}")
-    return True
-
-
 def run(asset_name):
     try:
         _log(f"Raw asset_name input: {asset_name!r}")
@@ -203,9 +161,6 @@ def run(asset_name):
         if not _ensure_unreal_directory(asset_folder_path):
             return ""
 
-        if not _ensure_assetholder_blueprint(asset_folder_path):
-            return ""
-
         for subfolder_name in ASSET_SUBFOLDERS:
             subfolder_path = f"{asset_folder_path}/{subfolder_name}"
             if not _ensure_unreal_directory(subfolder_path):
@@ -215,11 +170,6 @@ def run(asset_name):
             unreal.EditorAssetLibrary.save_directory(asset_folder_path, only_if_is_dirty=False, recursive=True)
         except Exception as exc:
             _log_warning(f"save_directory warning on {asset_folder_path}: {exc}")
-
-        try:
-            unreal.EditorAssetLibrary.sync_browser_to_objects([f"{asset_folder_path}/{ASSET_HOLDER_ASSET_NAME}"])
-        except Exception as exc:
-            _log_warning(f"sync_browser_to_objects warning: {exc}")
 
         _log(f"Created/validated Unreal asset folder structure: {asset_folder_path}")
         return asset_folder_path
