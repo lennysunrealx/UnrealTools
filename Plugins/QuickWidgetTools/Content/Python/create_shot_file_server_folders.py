@@ -52,6 +52,7 @@ SHOT_RELATIVE_FOLDER_TEMPLATES = (
 
     "sequences/{sequence_name}/{shot_name}/fx/_output",
     "sequences/{sequence_name}/{shot_name}/fx/houdini",
+    "sequences/{sequence_name}/{shot_name}/fx/emberLiquiGen",
 
     "sequences/{sequence_name}/{shot_name}/lite/_output",
     "sequences/{sequence_name}/{shot_name}/lite/unreal/_output",
