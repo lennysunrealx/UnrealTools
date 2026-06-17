@@ -103,5 +103,8 @@ desktop.ini
 !/Content/BlueprintTools/
 !/Content/BlueprintTools/**
 
+!/Content/BluePrints/
+!/Content/BluePrints/**
+
 !/Content/PythonTools/
 !/Content/PythonTools/**
