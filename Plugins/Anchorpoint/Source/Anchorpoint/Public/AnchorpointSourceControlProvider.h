@@ -55,6 +55,9 @@ public:
 	virtual bool UsesLocalReadOnlyState() const override;
 	virtual bool UsesChangelists() const override;
 	virtual bool UsesUncontrolledChangelists() const override;
+#if ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 8)
+	virtual bool UsesSoftRevertOnDelete() const override { return false; }
+#endif
 	virtual bool UsesCheckout() const override;
 	virtual bool UsesFileRevisions() const override;
 	virtual bool UsesSnapshots() const override;
